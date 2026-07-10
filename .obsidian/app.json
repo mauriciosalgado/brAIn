@@ -1,8 +1,0 @@
-{
-  "baseTheme": "dark",
-  "attachmentFolderPath": "attachments",
-  "alwaysUpdateLinks": true,
-  "newFileLocation": "folder",
-  "newFileFolderPath": "notes",
-  "promptDelete": false
-}

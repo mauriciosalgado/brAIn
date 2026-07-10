@@ -1,2 +1,23 @@
+# Python
 .venv/
-__pycache__
+__pycache__/
+*.pyc
+
+# RAG vector store (regenerated locally by `rag sync`)
+.rag/
+
+# OS
+.DS_Store
+
+# ---- Obsidian vault ----
+# Ignore everything under .obsidian by default so each person's local
+# settings (layout, appearance, per-plugin data) never interfere with git.
+.obsidian/*
+.obsidian/plugins/*/*
+
+# Keep ONLY the files that enforce the community-plugin install for everyone:
+!.obsidian/community-plugins.json
+!.obsidian/plugins/
+!.obsidian/plugins/*/main.js
+!.obsidian/plugins/*/manifest.json
+!.obsidian/plugins/*/styles.css

@@ -1,0 +1,337 @@
+{
+  "main": {
+    "id": "e7c23227bb95e1c4",
+    "type": "split",
+    "children": [
+      {
+        "id": "ef810dadabb4453e",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "12307b4e2dcdea54",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "brain/scripts/aws-ec2-create-instance.md",
+                "mode": "preview",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "aws-ec2-create-instance"
+            }
+          },
+          {
+            "id": "cc03d316c9f180d8",
+            "type": "leaf",
+            "state": {
+              "type": "markdown",
+              "state": {
+                "file": "grafana.md",
+                "mode": "source",
+                "source": false
+              },
+              "icon": "lucide-file",
+              "title": "grafana"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "vertical"
+  },
+  "left": {
+    "id": "f8cce7b73df9cbe3",
+    "type": "split",
+    "children": [
+      {
+        "id": "d36cbfdef86b08ee",
+        "type": "tabs",
+        "children": [
+          {
+            "id": "ebd66a5ae912e606",
+            "type": "leaf",
+            "state": {
+              "type": "file-explorer",
+              "state": {
+                "sortOrder": "alphabetical",
+                "autoReveal": false
+              },
+              "icon": "lucide-folder-closed",
+              "title": "Files"
+            }
+          },
+          {
+            "id": "914f0c31253caf04",
+            "type": "leaf",
+            "state": {
+              "type": "search",
+              "state": {
+                "query": "",
+                "matchingCase": false,
+                "explainSearch": false,
+                "collapseAll": true,
+                "extraContext": false,
+                "sortOrder": "alphabetical"
+              },
+              "icon": "lucide-search",
+              "title": "Search"
+            }
+          },
+          {
+            "id": "8dc7a71729ff2624",
+            "type": "leaf",
+            "state": {
+              "type": "bookmarks",
+              "state": {},
+              "icon": "lucide-bookmark",
+              "title": "Bookmarks"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 268.5
+  },
+  "right": {
+    "id": "bf4b3801fdb72e9b",
+    "type": "split",
+    "children": [
+      {
+        "id": "0928e27b74e3d26c",
+        "type": "tabs",
+        "dimension": 55.78947368421051,
+        "children": [
+          {
+            "id": "0cd26cba3467e0d0",
+            "type": "leaf",
+            "state": {
+              "type": "localgraph",
+              "state": {
+                "file": "brain/scripts/dsf-team-onboarding-aws-cli-config.md",
+                "options": {
+                  "collapse-filter": true,
+                  "search": "",
+                  "localJumps": 1,
+                  "localBacklinks": true,
+                  "localForelinks": true,
+                  "localInterlinks": false,
+                  "showTags": false,
+                  "showAttachments": false,
+                  "hideUnresolved": false,
+                  "collapse-color-groups": true,
+                  "colorGroups": [],
+                  "collapse-display": true,
+                  "showArrow": false,
+                  "textFadeMultiplier": 0,
+                  "nodeSizeMultiplier": 1,
+                  "lineSizeMultiplier": 1,
+                  "collapse-forces": true,
+                  "centerStrength": 0.518713248970312,
+                  "repelStrength": 10,
+                  "linkStrength": 1,
+                  "linkDistance": 250,
+                  "scale": 0.5683033011271109,
+                  "close": true
+                }
+              },
+              "icon": "lucide-git-fork",
+              "title": "Graph of dsf-team-onboarding-aws-cli-config"
+            }
+          },
+          {
+            "id": "2b9bdece873f6ad6",
+            "type": "leaf",
+            "state": {
+              "type": "backlink",
+              "state": {
+                "file": "brain/scripts/dsf-team-onboarding-aws-cli-config.md",
+                "collapseAll": true,
+                "extraContext": false,
+                "sortOrder": "alphabetical",
+                "showSearch": false,
+                "searchQuery": "",
+                "backlinkCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-coming-in",
+              "title": "Backlinks for dsf-team-onboarding-aws-cli-config"
+            }
+          },
+          {
+            "id": "6970ce574262e541",
+            "type": "leaf",
+            "state": {
+              "type": "outgoing-link",
+              "state": {
+                "file": "brain/scripts/dsf-team-onboarding-aws-cli-config.md",
+                "linksCollapsed": false,
+                "unlinkedCollapsed": true
+              },
+              "icon": "links-going-out",
+              "title": "Outgoing links from dsf-team-onboarding-aws-cli-config"
+            }
+          },
+          {
+            "id": "a611958c2a8b9ce0",
+            "type": "leaf",
+            "state": {
+              "type": "tag",
+              "state": {
+                "sortOrder": "frequency",
+                "useHierarchy": true,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-tags",
+              "title": "Tags"
+            }
+          },
+          {
+            "id": "a211d16015bd8314",
+            "type": "leaf",
+            "state": {
+              "type": "all-properties",
+              "state": {
+                "sortOrder": "frequency",
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-archive",
+              "title": "All properties"
+            }
+          },
+          {
+            "id": "604bc5cdb9bbb22e",
+            "type": "leaf",
+            "state": {
+              "type": "outline",
+              "state": {
+                "file": "grafana.md",
+                "followCursor": false,
+                "showSearch": false,
+                "searchQuery": ""
+              },
+              "icon": "lucide-list",
+              "title": "Outline of grafana"
+            }
+          }
+        ],
+        "currentTab": 5
+      },
+      {
+        "id": "389a485d90c779a7",
+        "type": "tabs",
+        "dimension": 44.21052631578949,
+        "children": [
+          {
+            "id": "823152b5160d789f",
+            "type": "leaf",
+            "state": {
+              "type": "localgraph",
+              "state": {
+                "file": "grafana.md",
+                "options": {
+                  "collapse-filter": true,
+                  "search": "",
+                  "localJumps": 1,
+                  "localBacklinks": true,
+                  "localForelinks": true,
+                  "localInterlinks": false,
+                  "showTags": false,
+                  "showAttachments": false,
+                  "hideUnresolved": false,
+                  "collapse-color-groups": true,
+                  "colorGroups": [],
+                  "collapse-display": true,
+                  "showArrow": false,
+                  "textFadeMultiplier": 0,
+                  "nodeSizeMultiplier": 1,
+                  "lineSizeMultiplier": 1,
+                  "collapse-forces": true,
+                  "centerStrength": 0.518713248970312,
+                  "repelStrength": 10,
+                  "linkStrength": 1,
+                  "linkDistance": 250,
+                  "scale": 1.2218432718653123,
+                  "close": true
+                }
+              },
+              "icon": "lucide-git-fork",
+              "title": "Graph of grafana"
+            }
+          }
+        ]
+      }
+    ],
+    "direction": "horizontal",
+    "width": 265.5,
+    "collapsed": true
+  },
+  "left-ribbon": {
+    "hiddenItems": {
+      "obsidian-excalidraw-plugin:New drawing": false,
+      "switcher:Open quick switcher": false,
+      "graph:Open graph view": false,
+      "canvas:Create new canvas": false,
+      "daily-notes:Open today's daily note": false,
+      "templates:Insert template": false,
+      "command-palette:Open command palette": false,
+      "bases:Create new base": false
+    }
+  },
+  "active": "12307b4e2dcdea54",
+  "lastOpenFiles": [
+    "identity.md",
+    "brain/handbook/aws-wildcard-certificate-renewal.md",
+    "presentation.md",
+    "grafana.md",
+    "feedback.md",
+    "images/grafana-observability-setup-v2.png",
+    "images/grafana-observability-setup.png",
+    "images",
+    "AGENTS.md",
+    "brain/architecture/dsf-platform-workflows.md",
+    "brain/scripts/aws-rds-snapshot-export-to-s3.md",
+    "brain/scripts/aws-rds-copy-backup-cross-account.md",
+    "brain/architecture/dsf-pre-commit-hooks.md",
+    "brain/architecture/dsf-iac-repo-terraform-workflow.md",
+    "brain/architecture/dsf-platform-architecture.md",
+    "brain/architecture/dsf-iac-pre-commit-hooks.md",
+    "brain/team/iac-hooks.md",
+    "brain/scripts/aws-ec2-create-instance.md",
+    "brain/architecture/review.md",
+    "README.md",
+    "STANDARDS.md",
+    "brain/scripts/aws-s3-create-bucket-with-iam.md",
+    "brain/scripts/dsf-aws-cli-sso-config.md",
+    "brain/us/dsf-3392.md",
+    "brain/decisions/dsf-basyx-helm-chart-publish.md",
+    "brain/architecture/dsf-iac-repo-structure.md",
+    "brain/team/dsf-team-onboarding-guide.md",
+    "brain/scripts/aws-ec2-generate-instance.md",
+    "brain/scripts/dsf-team-onboarding-aws-cli-config.md",
+    "brain/architecture/review.md~",
+    "brain/architecture/review.ms",
+    "brain/scripts",
+    "attachments/INC000109535939-attachment.png",
+    "brain/incidents",
+    "brain/architecture/review",
+    "brain/architecture/samu-feedback.txt",
+    "brain/architecture/samu-feedback",
+    "brain/decisions/dsf-platform-operators-management.md~",
+    "brain/decisions",
+    "Untitled.canvas",
+    "attachments/dsf-platform-architecture.png",
+    "attachments/dsf-k8s-architecture.png",
+    "attachments/aws-waf.png",
+    "attachments/external-secrets-operator.png",
+    "attachments/aws-loadbalancer-controller.png",
+    "attachments/argocd-icon.png",
+    "attachments/k8s-external-dns.png",
+    "Untitled 1.canvas",
+    "Untitled 2.canvas",
+    "Excalidraw/Untitled.canvas"
+  ]
+}

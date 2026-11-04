@@ -23,8 +23,7 @@ Tags: #domain #script
 ## Setup — write this run's config
 
 ```bash
-mkdir -p "@vault_path/notes/scripts/env"
-cat > "@vault_path/notes/scripts/env/my-runbook.env" << 'EOF'
+cat > /tmp/my-runbook.env << 'EOF'
 eval "$(/opt/homebrew/bin/brew shellenv)"   # add Homebrew to Obsidian's minimal PATH
 
 export EXAMPLE_HOST="localhost"
@@ -36,21 +35,21 @@ EOF
 ## Step 1 — <action>
 
 ```bash
-source "@vault_path/notes/scripts/env/my-runbook.env"
+source /tmp/my-runbook.env
 echo "Doing <action> against $EXAMPLE_HOST/$EXAMPLE_NAME"
 ```
 
 ## Step 2 — <action>
 
 ```bash
-source "@vault_path/notes/scripts/env/my-runbook.env"
+source /tmp/my-runbook.env
 echo "Next step for $EXAMPLE_NAME"
 ```
 
 ## Cleanup — remove this run's config
 
 ```bash
-rm -f "@vault_path/notes/scripts/env/my-runbook.env"
+rm -f /tmp/my-runbook.env
 ```
 
 ---

@@ -1,2 +1,0 @@
-#!/bin/sh
-echo "🎉 Post-merge hook fired! Merge completed at $(date)"

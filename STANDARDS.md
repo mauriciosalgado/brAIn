@@ -148,3 +148,14 @@ Tags: #domain #type
 
 ## References
 ```
+
+## Scripts & Runbooks
+
+Notes in `scripts/` can be **runnable** via the `execute-code` plugin (a ▶ button on each code
+block). Define an operation once; teammates run the vetted steps instead of re-deriving commands.
+Follow these rules (start from `templates/runbook-template.md`):
+
+- **Share state through a repo-local file, not `/tmp`.** Shell blocks are separate processes, so a first **Setup** block writes the run's non-secret config to `@vault_path/notes/scripts/env/<note>.env` (the `notes/scripts/env/` folder is gitignored). Each step block `source`s that file; a final **Cleanup** block removes it. Never use `/tmp` — it's purged after a few days, leaving steps with lost or stale state.
+- **Never store secrets** in the note or the `notes/scripts/env/` file. Read them at run time from the environment or a secret tool (`aws sso login`, `~/.pgpass`, OS keychain).
+- **Portable paths** via magic commands (`@vault_path`, `@note_path`) — never hardcoded absolute paths.
+- **PATH append.** `execute-code` runs with Obsidian's launch PATH, which on macOS omits Homebrew dirs — so `aws`, `psql`, etc. may be "not found". The runbook template prepends `/opt/homebrew/bin:/usr/local/bin` in the Setup block to fix this portably.

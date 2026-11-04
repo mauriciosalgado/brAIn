@@ -21,3 +21,14 @@ __pycache__/
 !.obsidian/plugins/*/main.js
 !.obsidian/plugins/*/manifest.json
 !.obsidian/plugins/*/styles.css
+
+# Keep the Templates setting so templates/ works once the Templates core plugin is on:
+!.obsidian/templates.json
+
+# Keep app.json so the shared attachment folder (notes/attachments) ships with the template:
+!.obsidian/app.json
+
+# NOTE: core-plugins.json is deliberately NOT tracked — it's a per-user *preference*
+# (which plugins each person enables), so tracking it would force our set on everyone and
+# turn every local toggle into a diff/conflict. Enabling the Templates plugin is a one-time
+# onboarding step instead. Rule of thumb: track conventions (app/templates), not preferences.

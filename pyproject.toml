@@ -14,3 +14,4 @@ build-backend = "hatchling.build"
 
 [project.scripts]
 rag = "rag.cli:main"
+rag-mcp = "rag.mcp.server:main"

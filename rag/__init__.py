@@ -55,17 +55,14 @@ def sync():
     return total_chunks
 
 
-def query(question: str, n_results: int = 5):
-
+def query(question: str, n_results: int = 5) -> list[dict]:
     if db.count() == 0:
         raise ValueError("Database is empty. Please run sync() first.")
 
-    else:
-        query_embeddings = embeddings.get_embeddings([question])[0]
-        documents, metadatas = db.query([query_embeddings], n_results=n_results)
+    query_embedding = embeddings.get_embeddings([question])[0]
+    documents, metadatas = db.query([query_embedding], n_results=n_results)
 
-        for doc, meta in zip(documents, metadatas):
-            print(f"Source: {meta['source']}")
-            print(f"Section: {meta['header_path']}")
-            print(f"\n\n{doc}\n\n{'-' * 40}")
-            print("")
+    return [
+        {"text": doc, "source": meta["source"], "header_path": meta["header_path"]}
+        for doc, meta in zip(documents, metadatas)
+    ]

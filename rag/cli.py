@@ -15,8 +15,10 @@ def main():
             print("Usage: rag query 'your question'")
             sys.exit(1)
         question = " ".join(sys.argv[2:])
-        result = rag.query(question)
-        print(result)
+        for hit in rag.query(question):
+            print(f"Source:  {hit['source']}")
+            print(f"Section: {hit['header_path']}")
+            print(f"\n{hit['text']}\n{'-' * 40}\n")
     elif command == "clean":
         rag.cleanup()
     else:

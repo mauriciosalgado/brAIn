@@ -1,0 +1,7 @@
+# Search markdown files under the notes directory
+[workspace]
+files = ["notes/**/*.md"]
+
+[toc]
+enabled = true
+marker = "toc"

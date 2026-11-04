@@ -12,6 +12,3 @@ SKIP_HEADERS: list[str] = ["References", "Table of Contents", "TOC"]
 
 # Embedding Configuration
 MODEL: str = "BAAI/bge-small-en-v1.5"
-
-# Sync State
-STATE_FILE: str = ".rag/state.json"

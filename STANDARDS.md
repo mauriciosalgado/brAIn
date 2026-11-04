@@ -1,6 +1,6 @@
 # Standards
 
-This document defines our standards for categorizing and naming notes in our knowledge base. It covers folder structure, file naming conventions and tagging strategy with some examples and a template for new documents.
+This document defines the standards for categorizing and naming notes in this knowledge base. It covers folder structure, file naming conventions and tagging strategy with some examples and a template for new documents.
 
 > [!NOTE]
 > All notes should be created in Markdown format and follow the naming and tagging conventions outlined in this document to ensure consistency and ease of navigation across our knowledge base.
@@ -11,19 +11,20 @@ This document defines our standards for categorizing and naming notes in our kno
 
 - [Structure](#structure)
 - [Naming Convention](#naming-convention)
-	* [Examples](#examples)
-	* [Incidents Naming Convention](#incidents-naming-convention)
-	* [Domains](#domains)
-	* [Domain vs Tag Strategy](#domain-vs-tag-strategy)
+  * [Examples](#examples)
+  * [Incidents Naming Convention](#incidents-naming-convention)
+  * [Domains](#domains)
+  * [Domain vs Tag Strategy](#domain-vs-tag-strategy)
 - [Tags](#tags)
 - [Document Template](#document-template)
+- [Scripts & Runbooks](#scripts--runbooks)
 
 <!-- tocstop -->
 
 ## Structure
 
 ```
-brain/
+notes/
 ├── architecture/   # How things are designed, configured, structured
 ├── handbook/       # How to do things, learn things, troubleshoot
 ├── decisions/      # Why we chose things (ADRs, rationale)

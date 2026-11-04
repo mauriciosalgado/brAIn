@@ -12,8 +12,6 @@ Links:
 <!-- toc -->
 
 - [Installation](#installation)
-- [Surprise](#surprise)
-- [Easter](#easter)
 - [References](#references)
 
 <!-- tocstop -->
@@ -55,14 +53,6 @@ opencode auth login
 ```
 
 After that, you can open a new shell session and run `opencode` to auto-upgrade.
-
-## Surprise
-
-Opencode is now fixed and discontinued.
-
-## Easter
-
-This is about easter eggs
 
 ---
 

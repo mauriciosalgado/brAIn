@@ -23,10 +23,6 @@ def cleanup():
         db.delete_collection(COLLECTION_NAME)
 
 
-def get():
-    return _get_collection().get()
-
-
 def add(ids, embeddings, metadatas, documents):
     _get_collection().add(
         ids=ids, embeddings=embeddings, documents=documents, metadatas=metadatas

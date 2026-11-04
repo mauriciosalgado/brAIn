@@ -54,7 +54,7 @@ def _extract_preamble(text: str, matches: list[re.Match]) -> str:
 
 
 def _build_chunks(
-    text: str, preamble: str, matches: list[re.Match], source: str, title: str
+    text: str, matches: list[re.Match], source: str, title: str
 ) -> list[Chunk]:
     """Build chunks based on header matches. Uses a stack to track current header path."""
 
@@ -137,9 +137,7 @@ def _chunk_markdown(text: str, filepath: Path) -> tuple[str, list[Chunk]]:
     # Extract title from first header if it exists
     title = matches[0].group(1).lstrip("#").strip()
     preamble = _extract_preamble(text, matches)
-    chunks = _build_chunks(
-        text=text, preamble="", matches=matches, source=source, title=title
-    )
+    chunks = _build_chunks(text=text, matches=matches, source=source, title=title)
     chunks = _merge_small_chunks(chunks, source)
 
     return preamble, chunks

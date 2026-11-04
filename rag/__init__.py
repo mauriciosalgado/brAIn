@@ -19,9 +19,6 @@ def _build_embedding_text(chunk: Chunk, preamble: str):
 
 def cleanup():
     db.cleanup()
-    state_file = Path(config.STATE_FILE)
-    if state_file.exists():
-        state_file.unlink()
 
 
 def sync():

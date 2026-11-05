@@ -1,4 +1,0 @@
-# Runtime .env config for runnable notes (execute-code plugin).
-# Local only — never committed. Written by a runbook's Setup block, removed by its Cleanup block.
-*
-!.gitignore

@@ -111,7 +111,7 @@ Tags: #incident #domain [#affected-tools...]
 | General monitoring setup that uses Grafana | `monitoring-`        | `#monitoring #grafana` |
 | Grafana-specific dashboard config          | `grafana-`           | `#grafana`             |
 | EKS cluster using API Gateway              | `eks-`               | `#eks #apigw`          |
-| Terraform module for EKS                   | `iac-`               | `#iac #eks`            |
+| Terraform module for EKS                   | `terraform-`         | `#terraform #eks`      |
 
 **Ask yourself:** "Is this note _about_ the tool, or does it just _use_ the tool?"
 
@@ -127,6 +127,17 @@ Every document gets **at least two tags**: domain + type. Additional tags are en
 ```
 Tags: #domain #type [#optional-tags...]
 ```
+
+The **type** is one of the fixed list below (exactly one per note), and it decides the folder. The **domain** is the main technology or topic, and the Domains table is only guidance, not a closed list. Tag order doesn't matter. Tags may also be a frontmatter list (`- domain`, `- type`), written without `#`.
+
+| Type           | Folder          |
+| -------------- | --------------- |
+| `architecture` | `architecture/` |
+| `handbook`     | `handbook/`     |
+| `decision`     | `decisions/`    |
+| `script`       | `scripts/`      |
+| `incident`     | `incidents/`    |
+| `team`         | `team/`         |
 
 ## Document Template
 
@@ -156,7 +167,7 @@ Notes in `scripts/` can be **runnable** via the `execute-code` plugin (a ▶ but
 block). Define an operation once; teammates run the vetted steps instead of re-deriving commands.
 Follow these rules (start from `templates/runbook-template.md`):
 
-- **Share state through a repo-local file, not `/tmp`.** Shell blocks are separate processes, so a first **Setup** block writes the run's non-secret config to `@vault_path/notes/scripts/env/<note>.env` (the `notes/scripts/env/` folder is gitignored). Each step block `source`s that file; a final **Cleanup** block removes it. Never use `/tmp` — it's purged after a few days, leaving steps with lost or stale state.
-- **Never store secrets** in the note or the `notes/scripts/env/` file. Read them at run time from the environment or a secret tool (`aws sso login`, `~/.pgpass`, OS keychain).
+- **Share state through a temp file.** Shell blocks are separate processes, so a first **Setup** block writes the run's non-secret config to `/tmp/<note>.env`. Each step block `source`s that file; a final **Cleanup** block removes it. If the file is gone (the OS clears `/tmp` every few days), re-run **Setup**.
+- **Never store secrets** in the note or the env file. Read them at run time from the environment or a secret tool (`aws sso login`, `~/.pgpass`, OS keychain).
 - **Portable paths** via magic commands (`@vault_path`, `@note_path`) — never hardcoded absolute paths.
 - **PATH append.** `execute-code` runs with Obsidian's launch PATH, which on macOS omits Homebrew dirs — so `aws`, `psql`, etc. may be "not found". The runbook template prepends `/opt/homebrew/bin:/usr/local/bin` in the Setup block to fix this portably.

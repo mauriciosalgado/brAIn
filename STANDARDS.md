@@ -128,7 +128,7 @@ Every document gets **at least two tags**: domain + type. Additional tags are en
 Tags: #domain #type [#optional-tags...]
 ```
 
-The **type** is one of the fixed list below (exactly one per note), and it decides the folder. The **domain** is the main technology or topic, and the Domains table is only guidance, not a closed list. Tag order doesn't matter. Tags may also be a frontmatter list (`- domain`, `- type`), written without `#`.
+The **type** says what kind of note it is (one per note) and matches its folder. It is for humans browsing the vault; search doesn't depend on it. Teams define their own types; the table below is a suggested baseline. The **domain** is the main technology or topic, and the Domains table is only guidance, not a closed list. Tag order doesn't matter. Tags may also be a frontmatter list (`- domain`, `- type`), written without `#`.
 
 | Type           | Folder          |
 | -------------- | --------------- |

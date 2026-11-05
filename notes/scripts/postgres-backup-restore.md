@@ -23,13 +23,11 @@ Tags: #postgres #script #backup
 
 ## Setup — write this run's config
 
-Run this **first**. It writes the config to `notes/scripts/env/postgres-backup-restore.env` (a repo-local,
-gitignored folder). Every step below sources it, and the final Cleanup block removes it — nothing
-is left in `/tmp` to expire or clean up later.
+Run this **first**. It writes the config to `/tmp/postgres-backup-restore.env`. Every step below sources it,
+and the final Cleanup block removes it.
 
 ```bash
-mkdir -p "@vault_path/notes/scripts/env"
-cat > "@vault_path/notes/scripts/env/postgres-backup-restore.env" << 'EOF'
+cat > /tmp/postgres-backup-restore.env << 'EOF'
 # execute-code runs with Obsidian's minimal PATH — add common tool dirs so CLIs are found.
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 export PGHOST="localhost"
@@ -39,13 +37,13 @@ export PGDATABASE="app_db"
 export BACKUP_DIR="$HOME/backups"
 # Password: from ~/.pgpass — do NOT put it here.
 EOF
-echo "Config written to notes/scripts/env/postgres-backup-restore.env"
+echo "Config written to /tmp/postgres-backup-restore.env"
 ```
 
 ## Back Up
 
 ```bash
-source "@vault_path/notes/scripts/env/postgres-backup-restore.env"
+source /tmp/postgres-backup-restore.env
 
 mkdir -p "$BACKUP_DIR"
 OUT="$BACKUP_DIR/$PGDATABASE-$(date +%Y%m%d-%H%M%S).dump"
@@ -59,7 +57,7 @@ echo "Backup written to: $OUT"
 > This overwrites objects in the target database. Double-check `PGDATABASE` before running.
 
 ```bash
-source "@vault_path/notes/scripts/env/postgres-backup-restore.env"
+source /tmp/postgres-backup-restore.env
 
 LATEST="$(ls -t "$BACKUP_DIR/$PGDATABASE"-*.dump | head -n1)"
 echo "Restoring: $LATEST"
@@ -70,7 +68,7 @@ echo "Restore complete."
 ## Verify
 
 ```bash
-source "@vault_path/notes/scripts/env/postgres-backup-restore.env"
+source /tmp/postgres-backup-restore.env
 
 psql --dbname="$PGDATABASE" -c "\dt"
 ```
@@ -78,8 +76,8 @@ psql --dbname="$PGDATABASE" -c "\dt"
 ## Cleanup
 
 ```bash
-rm -f "@vault_path/notes/scripts/env/postgres-backup-restore.env"
-echo "Removed notes/scripts/env/postgres-backup-restore.env"
+rm -f /tmp/postgres-backup-restore.env
+echo "Removed /tmp/postgres-backup-restore.env"
 ```
 
 ---

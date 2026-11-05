@@ -21,10 +21,9 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 brew --version | head -1
 
-mkdir -p "@vault_path/notes/scripts/env"
-cat > "@vault_path/notes/scripts/env/script-demo.env" << 'EOF'
+cat > /tmp/script-demo.env << 'EOF'
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
-export DATA_FILE="@vault_path/notes/scripts/env/script-demo.json"
+export DATA_FILE="/tmp/script-demo.json"
 EOF
 ```
 
@@ -33,7 +32,7 @@ EOF
 A fresh process: it sources the config from Step 1, then uses `jq` to write a small JSON file.
 
 ```bash
-source "@vault_path/notes/scripts/env/script-demo.env"
+source /tmp/script-demo.env
 
 jq -n '{project: "brAIn", note_types: ["architecture", "handbook", "decisions"]}' > "$DATA_FILE"
 cat "$DATA_FILE"
@@ -45,7 +44,7 @@ Another fresh process — proof the state came from the file, not memory. Source
 and queries the JSON that Step 2 created.
 
 ```bash
-source "@vault_path/notes/scripts/env/script-demo.env"
+source /tmp/script-demo.env
 
 count=$(jq '.note_types | length' "$DATA_FILE")
 echo "$(jq -r .project "$DATA_FILE") has $count note types:"
@@ -57,9 +56,9 @@ jq -r '.note_types[]' "$DATA_FILE"
 Removes the data and config files, leaving nothing behind.
 
 ```bash
-source "@vault_path/notes/scripts/env/script-demo.env"
+source /tmp/script-demo.env
 
-rm -f "$DATA_FILE" "@vault_path/notes/scripts/env/script-demo.env"
+rm -f "$DATA_FILE" /tmp/script-demo.env
 echo "Cleaned up."
 ```
 ## References

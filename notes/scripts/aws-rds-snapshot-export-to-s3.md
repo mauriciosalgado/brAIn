@@ -22,11 +22,10 @@ RDS needs to **assume** a role to write to your S3 bucket on your behalf. The tr
 
 ## Variables
 
-Edit and run this block first. It writes the variables to a gitignored file in `notes/scripts/env/` so all other blocks can source them.
+Edit and run this block first. It writes the variables to `/tmp/aws-rds-snapshot-export-to-s3.env` so all other blocks can source them.
 
 ```bash
-mkdir -p "@vault_path/notes/scripts/env"
-cat > "@vault_path/notes/scripts/env/aws-rds-snapshot-export-to-s3.env" << 'EOF'
+cat > /tmp/aws-rds-snapshot-export-to-s3.env << 'EOF'
 # execute-code runs with Obsidian's minimal PATH — add common tool dirs so CLIs are found.
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 export AWS_PROFILE="<aws-profile>"
@@ -39,7 +38,7 @@ export SNAPSHOT_ARN="<snapshot-arn>"
 export LOCAL_DOWNLOAD_DIR="<local-download-path>"
 EOF
 
-echo "Variables saved to notes/scripts/env/aws-rds-snapshot-export-to-s3.env"
+echo "Variables saved to /tmp/aws-rds-snapshot-export-to-s3.env"
 ```
 
 ## AWS Login
@@ -47,7 +46,7 @@ echo "Variables saved to notes/scripts/env/aws-rds-snapshot-export-to-s3.env"
 Before running the scripts you need to authenticate to AWS.
 
 ```bash
-source "@vault_path/notes/scripts/env/aws-rds-snapshot-export-to-s3.env"
+source /tmp/aws-rds-snapshot-export-to-s3.env
 
 aws sso login --sso-session <sso-session>
 ```
@@ -55,7 +54,7 @@ aws sso login --sso-session <sso-session>
 ## Create S3 Bucket
 
 ```bash
-source "@vault_path/notes/scripts/env/aws-rds-snapshot-export-to-s3.env"
+source /tmp/aws-rds-snapshot-export-to-s3.env
 
 # --- Create KMS Key ---
 KMS_KEY_ID=$(aws kms create-key \
@@ -84,7 +83,7 @@ echo "Bucket created: $BUCKET_NAME"
 Creates an IAM role that the RDS service can assume to write snapshot exports to the bucket.
 
 ```bash
-source "@vault_path/notes/scripts/env/aws-rds-snapshot-export-to-s3.env"
+source /tmp/aws-rds-snapshot-export-to-s3.env
 
 ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
 
@@ -175,7 +174,7 @@ echo "IAM Role: arn:aws:iam::$ACCOUNT_ID:role/$ROLE_NAME"
 Start the export task. This can take minutes to hours depending on snapshot size.
 
 ```bash
-source "@vault_path/notes/scripts/env/aws-rds-snapshot-export-to-s3.env"
+source /tmp/aws-rds-snapshot-export-to-s3.env
 
 ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
 
@@ -200,7 +199,7 @@ echo "aws rds describe-export-tasks --region $REGION"
 ## Check Export Status
 
 ```bash
-source "@vault_path/notes/scripts/env/aws-rds-snapshot-export-to-s3.env"
+source /tmp/aws-rds-snapshot-export-to-s3.env
 
 aws rds describe-export-tasks \
   --region "$REGION" \
@@ -213,7 +212,7 @@ aws rds describe-export-tasks \
 Once the export status is `COMPLETE`, download the exported files.
 
 ```bash
-source "@vault_path/notes/scripts/env/aws-rds-snapshot-export-to-s3.env"
+source /tmp/aws-rds-snapshot-export-to-s3.env
 
 mkdir -p "$LOCAL_DOWNLOAD_DIR"
 
@@ -230,7 +229,7 @@ du -sh "$LOCAL_DOWNLOAD_DIR"
 Delete the IAM role, S3 bucket (must be empty), and KMS key.
 
 ```bash
-source "@vault_path/notes/scripts/env/aws-rds-snapshot-export-to-s3.env"
+source /tmp/aws-rds-snapshot-export-to-s3.env
 
 KMS_KEY_ID=$(aws kms describe-key \
   --region "$REGION" \
@@ -264,7 +263,7 @@ aws kms schedule-key-deletion \
 echo "KMS Key scheduled for deletion in 7 days: $KMS_KEY_ID"
 
 # --- Remove the run's env file ---
-rm -f "@vault_path/notes/scripts/env/aws-rds-snapshot-export-to-s3.env"
+rm -f /tmp/aws-rds-snapshot-export-to-s3.env
 
 echo "Cleanup complete."
 ```

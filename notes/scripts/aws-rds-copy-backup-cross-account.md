@@ -41,8 +41,7 @@ RDS snapshots are private by default. Sharing grants another account access to s
 Only provide the two account profiles, the snapshot ARN, its KMS key ARN, and a name for the copy. Everything else is derived or created by the script.
 
 ```bash
-mkdir -p "@vault_path/notes/scripts/env"
-cat > "@vault_path/notes/scripts/env/aws-rds-copy-backup-cross-account.env" << 'EOF'
+cat > /tmp/aws-rds-copy-backup-cross-account.env << 'EOF'
 # execute-code runs with Obsidian's minimal PATH — add common tool dirs so CLIs are found.
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 export SRC_PROFILE="<source-aws-profile>"
@@ -53,7 +52,7 @@ export SRC_KMS_KEY_ARN="<source-kms-key-arn>"
 export SNAPSHOT_NAME="<snapshot-copy-name>"
 EOF
 
-echo "Variables saved to notes/scripts/env/aws-rds-copy-backup-cross-account.env"
+echo "Variables saved to /tmp/aws-rds-copy-backup-cross-account.env"
 ```
 
 ## AWS Login
@@ -61,7 +60,7 @@ echo "Variables saved to notes/scripts/env/aws-rds-copy-backup-cross-account.env
 Authenticate to both accounts before running the steps.
 
 ```bash
-source "@vault_path/notes/scripts/env/aws-rds-copy-backup-cross-account.env"
+source /tmp/aws-rds-copy-backup-cross-account.env
 
 aws sso login --sso-session <sso-session>
 ```
@@ -71,7 +70,7 @@ aws sso login --sso-session <sso-session>
 AWS Backup snapshots (prefixed `awsbackup:`) can't be shared via the RDS API. Copy to a manual snapshot first.
 
 ```bash
-source "@vault_path/notes/scripts/env/aws-rds-copy-backup-cross-account.env"
+source /tmp/aws-rds-copy-backup-cross-account.env
 
 MANUAL_SNAPSHOT_ARN=$(aws rds copy-db-cluster-snapshot \
   --profile "$SRC_PROFILE" \
@@ -88,7 +87,7 @@ aws rds wait db-cluster-snapshot-available \
   --region "$REGION" \
   --db-cluster-snapshot-identifier "$SNAPSHOT_NAME"
 echo "Manual snapshot ready: $MANUAL_SNAPSHOT_ARN"
-echo "export MANUAL_SNAPSHOT_ARN=\"$MANUAL_SNAPSHOT_ARN\"" >> "@vault_path/notes/scripts/env/aws-rds-copy-backup-cross-account.env"
+echo "export MANUAL_SNAPSHOT_ARN=\"$MANUAL_SNAPSHOT_ARN\"" >> /tmp/aws-rds-copy-backup-cross-account.env
 ```
 
 ## Step 2 — Grant KMS Access to Destination Account (Source Account)
@@ -96,7 +95,7 @@ echo "export MANUAL_SNAPSHOT_ARN=\"$MANUAL_SNAPSHOT_ARN\"" >> "@vault_path/notes
 Create a KMS grant so the destination account can decrypt the snapshot during copy.
 
 ```bash
-source "@vault_path/notes/scripts/env/aws-rds-copy-backup-cross-account.env"
+source /tmp/aws-rds-copy-backup-cross-account.env
 
 DST_ACCOUNT_ID=$(aws sts get-caller-identity \
   --profile "$DST_PROFILE" \
@@ -112,8 +111,8 @@ GRANT_ID=$(aws kms create-grant \
   --output text)
 
 echo "KMS Grant created: $GRANT_ID"
-echo "export KMS_GRANT_ID=\"$GRANT_ID\"" >> "@vault_path/notes/scripts/env/aws-rds-copy-backup-cross-account.env"
-echo "export DST_ACCOUNT_ID=\"$DST_ACCOUNT_ID\"" >> "@vault_path/notes/scripts/env/aws-rds-copy-backup-cross-account.env"
+echo "export KMS_GRANT_ID=\"$GRANT_ID\"" >> /tmp/aws-rds-copy-backup-cross-account.env
+echo "export DST_ACCOUNT_ID=\"$DST_ACCOUNT_ID\"" >> /tmp/aws-rds-copy-backup-cross-account.env
 ```
 
 ## Step 3 — Share Snapshot with Destination Account (Source Account)
@@ -124,7 +123,7 @@ Allow the destination account to see and copy the manual snapshot.
 > Every RDS snapshot has a `restore` attribute — a list of account IDs allowed to see and copy it. By default, only the owning account has access. This command adds the destination account to that list. Without it, the destination would get "snapshot not found" in Step 5. This grants visibility and copy permission only — the KMS grant from Step 2 is still needed to decrypt the data.
 
 ```bash
-source "@vault_path/notes/scripts/env/aws-rds-copy-backup-cross-account.env"
+source /tmp/aws-rds-copy-backup-cross-account.env
 
 aws rds modify-db-cluster-snapshot-attribute \
   --profile "$SRC_PROFILE" \
@@ -141,13 +140,13 @@ echo "Snapshot shared with account: $DST_ACCOUNT_ID"
 Cross-account snapshot copies require a customer-managed KMS key in the destination. If one already exists, skip this step and inject its ID into the env file instead:
 
 ```bash
-echo 'export DST_KMS_KEY_ID="<existing-kms-key-id>"' >> "@vault_path/notes/scripts/env/aws-rds-copy-backup-cross-account.env"
+echo 'export DST_KMS_KEY_ID="<existing-kms-key-id>"' >> /tmp/aws-rds-copy-backup-cross-account.env
 ```
 
 Otherwise, create a new one:
 
 ```bash
-source "@vault_path/notes/scripts/env/aws-rds-copy-backup-cross-account.env"
+source /tmp/aws-rds-copy-backup-cross-account.env
 
 DST_KMS_KEY_ID=$(aws kms create-key \
   --profile "$DST_PROFILE" \
@@ -163,7 +162,7 @@ aws kms create-alias \
   --target-key-id "$DST_KMS_KEY_ID"
 
 echo "Destination KMS Key created: $DST_KMS_KEY_ID"
-echo "export DST_KMS_KEY_ID=\"$DST_KMS_KEY_ID\"" >> "@vault_path/notes/scripts/env/aws-rds-copy-backup-cross-account.env"
+echo "export DST_KMS_KEY_ID=\"$DST_KMS_KEY_ID\"" >> /tmp/aws-rds-copy-backup-cross-account.env
 ```
 
 ## Step 5 — Copy Snapshot to Destination Account (Destination Account)
@@ -171,7 +170,7 @@ echo "export DST_KMS_KEY_ID=\"$DST_KMS_KEY_ID\"" >> "@vault_path/notes/scripts/e
 Copy the shared snapshot into the destination account. This re-encrypts it with the destination's KMS key, removing any dependency on the source key.
 
 ```bash
-source "@vault_path/notes/scripts/env/aws-rds-copy-backup-cross-account.env"
+source /tmp/aws-rds-copy-backup-cross-account.env
 
 aws rds copy-db-cluster-snapshot \
   --profile "$DST_PROFILE" \
@@ -193,7 +192,7 @@ echo "Snapshot available in destination: $SNAPSHOT_NAME"
 Revoke the KMS grant and delete the manual snapshot from the source account. The destination KMS key is **not deleted** — the copied snapshot depends on it. If the env was lost, run the "Recover Environment" step first.
 
 ```bash
-source "@vault_path/notes/scripts/env/aws-rds-copy-backup-cross-account.env"
+source /tmp/aws-rds-copy-backup-cross-account.env
 
 # --- Revoke KMS grant ---
 aws kms revoke-grant \
@@ -218,7 +217,7 @@ echo "Source cleanup complete. Destination snapshot remains: $SNAPSHOT_NAME"
 When the copied snapshot is no longer needed, delete it and its KMS key.
 
 ```bash
-source "@vault_path/notes/scripts/env/aws-rds-copy-backup-cross-account.env"
+source /tmp/aws-rds-copy-backup-cross-account.env
 
 # --- Delete destination snapshot ---
 aws rds delete-db-cluster-snapshot \
@@ -240,7 +239,7 @@ aws kms schedule-key-deletion \
 echo "KMS Key scheduled for deletion in 7 days: $DST_KMS_KEY_ID"
 
 # --- Remove the run's env file (this is the final step of the whole runbook) ---
-rm -f "@vault_path/notes/scripts/env/aws-rds-copy-backup-cross-account.env"
+rm -f /tmp/aws-rds-copy-backup-cross-account.env
 
 echo "Destination cleanup complete."
 ```
@@ -250,7 +249,7 @@ echo "Destination cleanup complete."
 Re-derives all variables from AWS in case the env file was lost. Requires the Variables block to be run first.
 
 ```bash
-source "@vault_path/notes/scripts/env/aws-rds-copy-backup-cross-account.env"
+source /tmp/aws-rds-copy-backup-cross-account.env
 
 DST_ACCOUNT_ID=$(aws sts get-caller-identity \
   --profile "$DST_PROFILE" \
@@ -284,7 +283,7 @@ DST_KMS_KEY_ID=$(aws kms describe-key \
   --query "KeyMetadata.KeyId" \
   --output text)
 
-cat >> "@vault_path/notes/scripts/env/aws-rds-copy-backup-cross-account.env" << EOF
+cat >> /tmp/aws-rds-copy-backup-cross-account.env << EOF
 export DST_ACCOUNT_ID="$DST_ACCOUNT_ID"
 export MANUAL_SNAPSHOT_ARN="$MANUAL_SNAPSHOT_ARN"
 export SRC_KMS_KEY_ARN="$SRC_KMS_KEY_ARN"
@@ -292,7 +291,7 @@ export KMS_GRANT_ID="$KMS_GRANT_ID"
 export DST_KMS_KEY_ID="$DST_KMS_KEY_ID"
 EOF
 
-echo "Environment recovered to notes/scripts/env/aws-rds-copy-backup-cross-account.env"
+echo "Environment recovered to /tmp/aws-rds-copy-backup-cross-account.env"
 ```
 
 ## References

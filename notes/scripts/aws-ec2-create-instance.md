@@ -11,11 +11,10 @@ Tags: #aws #script #ec2
 
 ## Variables
 
-Edit and run this block first. It writes the variables to a gitignored file in `notes/scripts/env/` so all other blocks can source them.
+Edit and run this block first. It writes the variables to `/tmp/aws-ec2-create-instance.env` so all other blocks can source them.
 
 ```bash
-mkdir -p "@vault_path/notes/scripts/env"
-cat > "@vault_path/notes/scripts/env/aws-ec2-create-instance.env" << 'EOF'
+cat > /tmp/aws-ec2-create-instance.env << 'EOF'
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 export AWS_PROFILE="<aws-profile>"
@@ -28,7 +27,7 @@ export SUBNET_ID="<subnet-id>"
 export SG_NAME="<security-group-name>"
 EOF
 
-echo "Variables saved to notes/scripts/env/aws-ec2-create-instance.env"
+echo "Variables saved to /tmp/aws-ec2-create-instance.env"
 ```
 
 ## AWS Login
@@ -36,7 +35,7 @@ echo "Variables saved to notes/scripts/env/aws-ec2-create-instance.env"
 Before running the scripts you need to authenticate to AWS
 
 ```bash
-source "@vault_path/notes/scripts/env/aws-ec2-create-instance.env"
+source /tmp/aws-ec2-create-instance.env
 
 aws sso login --sso-session <sso-session>
 ```
@@ -44,7 +43,7 @@ aws sso login --sso-session <sso-session>
 ## Create Instance
 
 ```bash
-source "@vault_path/notes/scripts/env/aws-ec2-create-instance.env"
+source /tmp/aws-ec2-create-instance.env
 
 # --- Create Key Pair ---
 aws ec2 create-key-pair \
@@ -110,7 +109,7 @@ echo "Instance ready — Private IP: $PRIVATE_IP"
 > This section should be run from the terminal, don't execute the code snippet
 
 ```bash
-source "@vault_path/notes/scripts/env/aws-ec2-create-instance.env"
+source /tmp/aws-ec2-create-instance.env
 
 PRIVATE_IP=$(aws ec2 describe-instances \
   --region "$REGION" \
@@ -126,7 +125,7 @@ ssh -i ~/.ssh/"$KEY_NAME.pem" ec2-user@"$PRIVATE_IP"
 Terminate the instance, delete the security group and the key-pair.
 
 ```bash
-source "@vault_path/notes/scripts/env/aws-ec2-create-instance.env"
+source /tmp/aws-ec2-create-instance.env
 
 # --- Terminate Instance ---
 INSTANCE_ID=$(aws ec2 describe-instances \
@@ -155,7 +154,7 @@ rm -f ~/.ssh/"$KEY_NAME.pem"
 echo "Key pair deleted."
 
 # --- Remove the run's env file ---
-rm -f "@vault_path/notes/scripts/env/aws-ec2-create-instance.env"
+rm -f /tmp/aws-ec2-create-instance.env
 
 echo "Cleanup complete."
 ```

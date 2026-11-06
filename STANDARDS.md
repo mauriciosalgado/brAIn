@@ -3,7 +3,7 @@
 This document defines the standards for categorizing and naming notes in this knowledge base. It covers folder structure, file naming conventions, tagging strategy and how a note is laid out. Start new notes from a file in `templates/`.
 
 > [!NOTE]
-> All notes should be created in Markdown format and follow the naming and tagging conventions outlined in this document to ensure consistency and ease of navigation across our knowledge base.
+> All notes should be created in Markdown format and follow the naming and tagging conventions outlined in this document to ensure consistency and ease of navigation across the knowledge base. These are good defaults: adjust the folders and types to suit you, and keep them consistent.
 
 ## Table of Contents
 
@@ -27,46 +27,40 @@ This document defines the standards for categorizing and naming notes in this kn
 notes/
 ├── architecture/   # How things are designed, configured, structured
 ├── handbook/       # How to do things, learn things, troubleshoot
-├── decisions/      # Why we chose things (ADRs, rationale)
+├── decisions/      # Why things were chosen (ADRs, rationale)
 ├── scripts/        # Script sharing
 ├── incidents/      # What went wrong (post-mortems)
-└── team/           # Team-specific (dev plans, onboarding, competency charts)
+└── team/           # People and process (plans, onboarding, working agreements)
 ```
 
 ## Naming Convention
 
-**Pattern: `[dsf-]domain-[subdomain]-description.md`**
+**Pattern: `[team-]domain-[subdomain]-description.md`**
 
 All lowercase. Hyphens between words.
 
-| Part          | Required         | Description                             |
-| ------------- | ---------------- | --------------------------------------- |
-| `dsf-`        | if team-specific | Our configs, decisions, architecture    |
-| `domain`      | yes              | Primary technology                      |
-| `subdomain`   | if needed        | Component within domain                 |
-| `description` | yes              | What the doc is about — conveys purpose |
+| Part          | Required  | Description                                                              |
+| ------------- | --------- | ------------------------------------------------------------------------ |
+| `team-`       | optional  | Your team's or organisation's short name, such as `acme-`. Skip it when working alone. |
+| `domain`      | yes       | Primary technology                                                       |
+| `subdomain`   | if needed | Component within the domain                                              |
+| `description` | yes       | What the doc is about — conveys purpose                                  |
+
+Use the `team-` prefix for notes about **your own** setup, decisions and architecture, so they stand
+apart from general how-tos that anyone could follow.
 
 ### Examples
 
-**With subdomain:**
+| Filename                      | Team   | Domain   | Subdomain | Folder       |
+| ----------------------------- | ------ | -------- | --------- | ------------ |
+| `aws-iam-role-create.md`      |        | aws      | iam       | `handbook/`  |
+| `kafka-topic-create.md`       |        | kafka    | topic     | `handbook/`  |
+| `opencode-install.md`         |        | opencode |           | `handbook/`  |
+| `acme-eks-cluster-upgrade.md` | `acme` | eks      | cluster   | `handbook/`  |
+| `acme-argocd-vs-flux.md`      | `acme` | argocd   |           | `decisions/` |
 
-| Filename                             | Domain | Subdomain            | Folder      |
-| ------------------------------------ | ------ | -------------------- | ----------- |
-| `edc-contract-negotiation-create.md` | edc    | contract-negotiation | `handbook/` |
-| `aws-iam-role-create.md`             | aws    | iam                  | `handbook/` |
-
-**Without subdomain:**
-
-| Filename                | Domain   | Folder       |
-| ----------------------- | -------- | ------------ |
-| `dsf-argocd-vs-flux.md` | argocd   | `decisions/` |
-| `opencode-install.md`   | opencode | `handbook/`  |
-
-**Edge cases:**
-
-| Filename                      | Why                                          | Folder       |
-| ----------------------------- | -------------------------------------------- | ------------ |
-| `dsf-eks-to-ecs-migration.md` | Multiple domains: Use primary, tag the other | `decisions/` |
+**Edge case:** a note about several domains (`acme-eks-to-ecs-migration.md`, in `decisions/`) uses the
+primary domain in the filename and tags the other.
 
 ### Incidents Naming Convention
 
@@ -91,6 +85,8 @@ Tags: #incident #domain [#affected-tools...]
 
 ### Domains
 
+Examples. Use the domains your own notes are about.
+
 | Domain      | Covers             | Subdomains (for filenames)       |
 | ----------- | ------------------ | -------------------------------- |
 | `aws`       | AWS services       | `iam`, `vpc`, `s3`               |
@@ -99,8 +95,7 @@ Tags: #incident #domain [#affected-tools...]
 | `argocd`    | ArgoCD             | `apps`, `appsets`, `sync`        |
 | `helm`      | Helm               | `charts`, `repos`, `values`      |
 | `terraform` | Terraform/IaC      | `modules`, `state-file`, `vars`  |
-| `edc`       | Eclipse Dataspace  | `policies`, `assets`, `catalog`  |
-| `basyx`     | BaSyx AAS          | `registry`, `discovery`, `dtr`   |
+| `kafka`     | Apache Kafka       | `topics`, `consumers`, `connect` |
 
 ### Domain vs Tag Strategy
 
@@ -148,8 +143,9 @@ The **type** says what kind of note it is (one per note) and matches its folder.
 
 ## Scripts & Runbooks
 
-Notes in `scripts/` can be **runnable** via the `execute-code` plugin (a ▶ button on each code
-block). Define an operation once; teammates run the vetted steps instead of re-deriving commands.
+If you use Obsidian with the `execute-code` plugin, notes in `scripts/` can be **runnable** (a ▶
+button on each code block). Define an operation once; anyone can run the vetted steps instead of
+re-deriving commands.
 Follow these rules (start from `templates/runbook-template.md`):
 
 - **Share state through a temp file.** Shell blocks are separate processes, so a first **Setup** block writes the run's non-secret config to `/tmp/<note>.env`. Each step block `source`s that file; a final **Cleanup** block removes it. If the file is gone (the OS clears `/tmp` every few days), re-run **Setup**.

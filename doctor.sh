@@ -20,12 +20,12 @@ check() {
 # Loads the model from disk only (nothing is downloaded) and embeds a sentence, so a missing,
 # partial or corrupt download is caught.
 model_works() {
-  uv run --no-sync python -c "import sys; from rag import embeddings; sys.exit(not embeddings.model_works())"
+  uv run --no-sync python -c "import sys; from rag.index import embeddings; sys.exit(not embeddings.model_works())"
 }
 
 # The branch the index follows (main, or BRAIN_BRANCH) must exist and have commits.
 index_branch() {
-  uv run --no-sync python -c "from rag import git; git.main_commit()"
+  uv run --no-sync python -c "from rag.notes import vault; vault.branch_tip()"
 }
 
 # Hooks only run when git is pointed at .githooks and the scripts are executable.
@@ -43,7 +43,7 @@ check "brain.toml is valid" "run: uv run rag status, and fix what it says" uv ru
 check "MCP server loads" "run ./setup.sh" uv run --no-sync python -c "import rag.mcp.server"
 check "embedding model works offline" "run ./setup.sh; needs internet once" model_works
 check "git hooks enabled" "run ./setup.sh" hooks_enabled
-check "index branch found" "create 'main', or set BRAIN_BRANCH to your team's main branch" index_branch
+check "index branch found" "create 'main', or set branch in brain.toml to the branch your notes are on" index_branch
 check "index up to date" "run ./setup.sh; details: uv run rag status" uv run --no-sync rag status
 
 if [ "$ok" = false ]; then

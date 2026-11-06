@@ -1,29 +1,21 @@
+import argparse
 import logging
 import sys
 
-import rag
-from rag import config, embeddings
-
-USAGE = """Usage: rag <command> [args]
-Commands:
-  sync            index the notes main added or modified, drop the ones it deleted
-  query <text>    show the notes most similar to the text
-  status          compare the index with git (changes nothing)
-  model           download the embedding model, or repair a missing or damaged one"""
+from rag import config
+from rag.index import embeddings, indexer, search
 
 
-def _sync(_args: list[str]) -> int:
-    stats = rag.sync()
+def _sync(_args) -> int:
+    stats = indexer.sync()
     print(f"{stats.indexed} indexed ({stats.chunks} chunks), {stats.removed} removed")
     for source, reason in stats.failed.items():
         print(f"skipped {source}: {reason}", file=sys.stderr)
     return 1 if stats.failed else 0
 
 
-def _query(args: list[str]) -> int:
-    if not args:
-        return _usage()
-    for hit in rag.query(" ".join(args)):
+def _query(args) -> int:
+    for hit in search.query(" ".join(args.question)):
         print(f"Source:  {hit['source']}")
         print(f"Section: {hit['header_path']}")
         print(f"Score:   {hit['score']:.2f}")
@@ -31,33 +23,43 @@ def _query(args: list[str]) -> int:
     return 0
 
 
-def _status(_args: list[str]) -> int:
-    status = rag.status()
+def _status(_args) -> int:
+    status = indexer.status()
     indexed = (status.indexed_commit or "nothing")[:7]
     print(f"{status.notes} notes indexed ({status.chunks} chunks), {status.pending} to update")
-    print(f"index at {indexed}, {config.BRANCH} at {status.main_commit[:7]}")
+    print(f"index at {indexed}, {config.BRANCH} at {status.branch_tip[:7]}")
     return 1 if status.pending or status.indexed_commit is None else 0
 
 
-def _model(_args: list[str]) -> int:
+def _model(_args) -> int:
     embeddings.ensure_model()
     print("The embedding model is ready")
     return 0
 
 
-def _usage(_args: list[str] | None = None) -> int:
-    print(USAGE)
-    return 1
-
-
-COMMANDS = {"sync": _sync, "query": _query, "status": _status, "model": _model}
+def _parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="rag", description="Search your notes.")
+    commands = parser.add_subparsers(dest="command", required=True, metavar="command")
+    commands.add_parser("sync", help="index what changed on the searched branch").set_defaults(
+        run=_sync
+    )
+    query = commands.add_parser("query", help="show the passages that best match a question")
+    query.add_argument("question", nargs="+")
+    query.set_defaults(run=_query)
+    commands.add_parser("status", help="say whether the index is up to date").set_defaults(
+        run=_status
+    )
+    commands.add_parser("model", help="download the search model, or repair it").set_defaults(
+        run=_model
+    )
+    return parser
 
 
 def main() -> None:
     logging.basicConfig(level=logging.WARNING, format="%(message)s")
-    command, *args = sys.argv[1:] or [""]
+    args = _parser().parse_args()
     try:
-        code = COMMANDS.get(command, _usage)(args)
+        code = args.run(args)
     except (ValueError, RuntimeError) as error:  # a clear message, not a traceback
         print(f"rag: {error}", file=sys.stderr)
         code = 1

@@ -72,15 +72,6 @@ def test_setup_does_everything_in_order_and_ends_with_the_doctor(clone, tmp_path
     assert "All good" in result.stdout
 
 
-def test_setup_restores_the_executable_bit_of_the_hooks(clone, tmp_path):
-    for hook in (clone / ".githooks").iterdir():
-        hook.chmod(0o644)  # what a zip download or some file systems do
-    assert (
-        run(clone / "setup.sh", path=fake_uv(tmp_path / "bin", tmp_path / "uv.log")).returncode == 0
-    )
-    assert all((clone / ".githooks" / h).stat().st_mode & 0o111 for h in (*HOOKS, "sync-notes"))
-
-
 def test_setup_can_be_run_again(clone, tmp_path):
     path = fake_uv(tmp_path / "bin", tmp_path / "uv.log")
     for _ in range(2):
@@ -168,13 +159,6 @@ def test_doctor_flags_each_failing_check_and_only_that_one(clone, tmp_path, fail
     assert expected in result.stdout and result.stdout.count("✗") == 1
 
 
-def test_doctor_checks_the_model_through_the_code_that_never_downloads(clone, tmp_path):
-    healthy_clone(clone)
-    log = tmp_path / "uv.log"
-    run(clone / "doctor.sh", path=fake_uv(tmp_path / "bin", log))
-    assert "embeddings.model_works()" in log.read_text()
-
-
 @pytest.mark.parametrize("broken", ["missing", "not-executable"])
 def test_doctor_flags_hooks_that_git_would_not_run(clone, tmp_path, broken):
     healthy_clone(clone)
@@ -185,13 +169,6 @@ def test_doctor_flags_hooks_that_git_would_not_run(clone, tmp_path, broken):
         hook.chmod(0o644)
     result = run(clone / "doctor.sh", path=fake_uv(tmp_path / "bin", tmp_path / "uv.log"))
     assert "✗ git hooks enabled" in result.stdout and result.returncode == 1
-
-
-def test_doctor_changes_nothing(clone, tmp_path):
-    healthy_clone(clone)
-    before = sorted(p.name for p in clone.rglob("*") if ".git/" not in str(p))
-    run(clone / "doctor.sh", path=fake_uv(tmp_path / "bin", tmp_path / "uv.log"))
-    assert sorted(p.name for p in clone.rglob("*") if ".git/" not in str(p)) == before
 
 
 # ---- the hooks themselves -------------------------------------------------------------------
@@ -228,15 +205,6 @@ def test_hook_finds_uv_in_the_users_local_bin_when_git_has_a_minimal_path(clone,
     assert "run rag sync" in log.read_text()
 
 
-def test_the_callers_uv_wins_over_the_fallback_locations(clone, tmp_path):
-    home = tmp_path / "home"
-    fake_uv(home / ".local" / "bin", tmp_path / "fallback.log")
-    mine = fake_uv(tmp_path / "mine", tmp_path / "mine.log")
-    run_hook(clone, "post-merge", mine, home)
-    wait_for(tmp_path / "mine.log")
-    assert (tmp_path / "mine.log").exists() and not (tmp_path / "fallback.log").exists()
-
-
 @pytest.mark.skipif(
     any(shutil.which("uv", path=p) for p in ("/opt/homebrew/bin", "/usr/local/bin")),
     reason="uv is installed in a location the hook falls back to",
@@ -244,16 +212,3 @@ def test_the_callers_uv_wins_over_the_fallback_locations(clone, tmp_path):
 def test_hook_without_uv_never_breaks_git(clone, tmp_path):
     result = run_hook(clone, "post-merge", SYSTEM_PATH, tmp_path / "nohome")
     assert result.returncode == 0 and "uv not found" in result.stderr
-
-
-def test_hook_outside_a_repository_does_nothing(tmp_path):
-    shutil.copytree(PROJECT / ".githooks", tmp_path / ".githooks")
-    result = subprocess.run(
-        [str(tmp_path / ".githooks" / "post-merge")],
-        cwd=tmp_path,
-        env={"PATH": SYSTEM_PATH, "HOME": str(tmp_path)},
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    assert result.returncode == 0

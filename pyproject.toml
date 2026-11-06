@@ -9,6 +9,7 @@ dependencies = [
     "lancedb>=0.41,<1",
     "markdown-it-py>=4.0.0",
     "pyarrow>=14",
+    "pydantic>=2",
 ]
 
 [build-system]
@@ -18,6 +19,7 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "pytest>=9.2.0",
+    "ty>=0.0.99",
 ]
 
 [project.scripts]
@@ -32,7 +34,6 @@ select = ["E", "F", "I", "B", "SIM", "C4", "UP", "RUF", "PL", "PERF", "FURB", "N
 ignore = [
     "PLR2004",  # magic numbers are fine in tests and thresholds
     "PLC0415",  # imports inside functions keep optional work lazy
-    "PLW0603",  # the lazily loaded model is a module-level global
 ]
 
 [tool.pytest.ini_options]

@@ -1,17 +1,39 @@
 [project]
 name = "rag"
 version = "0.1.0"
-requires-python = ">=3.10, <3.14"
+requires-python = ">=3.11, <3.14"
 dependencies = [
-    "chromadb>=0.4.0",
     "fastembed>=0.4.0",
-    "fastmcp>=3.0.0",
+    "fastmcp>=3.0,<4",
+    "filelock>=3.25.1",
+    "lancedb>=0.41,<1",
+    "markdown-it-py>=4.0.0",
+    "pyarrow>=14",
 ]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
 [project.scripts]
 rag = "rag.cli:main"
 rag-mcp = "rag.mcp.server:main"
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "SIM", "C4", "UP", "RUF", "PL", "PERF", "FURB", "N"]
+ignore = [
+    "PLR2004",  # magic numbers are fine in tests and thresholds
+    "PLC0415",  # imports inside functions keep optional work lazy
+    "PLW0603",  # the lazily loaded model is a module-level global
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

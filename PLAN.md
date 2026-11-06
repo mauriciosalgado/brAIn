@@ -1,0 +1,87 @@
+# brAIn plan
+
+Goal: a team knowledge vault (Markdown in `notes/`) that humans browse and AI agents search, with the
+index local to each developer. No servers.
+
+Rules: keep it simple · measure before adding · nothing is committed without the owner's OK.
+
+## Done
+
+- [x] Note standards, templates, runbooks keep state in `/tmp` (`STANDARDS.md`, `templates/`)
+- [x] Chunker: heading-aware, code fences and tables kept valid (`rag/chunker.py`). Tested on a 70-note team
+      vault + 12 messy real-world notes (`tests/fixtures/`), and fuzzed with 1.7M mutated documents
+      (shuffled, cut, spliced, injected markup): size limit, no text lost, fences valid, headings findable
+- [x] Embedder: arctic-embed-m-v2.0 int8 (multilingual, Apache-2.0, 320 MB, registered as a fastembed custom model), small batches, query prefix, model cached in `.rag/models`, repaired by `rag model`
+- [x] Local index: LanceDB in `.rag/`, exact scan below 50k chunks, IVF-HNSW above
+- [x] Index follows git: what git reports as A / M / D since the last indexed commit is indexed / re-indexed /
+      removed (`rag/git.py`); one marker (the commit) says if the index is fresh
+- [x] Git flow: `.githooks/` + `setup.sh` + `doctor.sh`; every search also compares the marker with the tip of `main` (17 ms)
+- [x] Notes with no content (empty, title only) or unreadable are reported, never silently skipped
+- [x] MCP tool `search_notes` (bounded `k`, clear errors) and CLI `rag sync | query | status | model | reset`
+- [x] Proven at 200,000 chunks (5 ms search; 1.8 GB on disk at 768 dims, about 3x less at the 256 used now); 20,000 notes: a pull of 15 changed
+      notes syncs in 0.1 s; 709 tests. First index costs about 22 ms per chunk (100k chunks is about 35 min)
+
+## Next (in order)
+
+Bugs found in review (confirmed by running them):
+
+- [x] Case-only rename (`aws-keys.md` → `AWS-KEYS.md`) leaves both paths in the index on macOS: decide
+      added/deleted from git's A/D/M letter, not from `is_file()`
+- [x] Failed notes were never retried: notes are now read from the commit, so failures are
+      deterministic and a fixing commit retries them
+- [x] `requires-python` is `>=3.11,<3.14` (`onnxruntime` has no 3.10 wheel)
+
+Then:
+
+- [ ] Commit the baseline
+- [x] `README.md` and `AGENTS.md`: what it is, 3-command setup, MCP config, how to write a note
+- [ ] CI: pytest, ruff, shellcheck on Python 3.11-3.13 (the model must be downloaded first)
+- [ ] `rag eval`: run labelled questions (`tests/fixtures/team-vault/gold.json`, 85 of them) against the index
+      and print hit@k / MRR, so any change to model, chunking or margin is measured, not guessed
+- [ ] Re-tune chunk size (1000 chars) for the current model, and the 0.10 score margin, with `rag eval`
+- [ ] Exact-identifier boost (`aws-rds-copy`, error codes, flags): BM25 hybrid gave no gain on paraphrased
+      questions, but identifier queries were not measured
+- [x] MCP `search_notes` returns plain text: one `<passage rank source section>` block per chunk, text unescaped
+- [ ] MCP tools for the vault itself (no similarity): `read_note(path)` (read from `main`), `list_notes(folder)`
+- [x] `brain.toml`: team settings in the repo (branch, skipped headings, result count, score margin, chunk
+      sizes), read at run time and validated; `BRAIN_BRANCH` stays as a personal override
+- [ ] MCP: the first search on a big unindexed vault must not block for minutes (a host times out): say
+      "index is building" and answer from what exists
+- [x] Agent authoring help: MCP tools `get_note_standards` and `get_note_template`
+- [ ] Peak memory of a query is 1.35 GB (multilingual vocabulary): check whether it can come down
+- [ ] Measure German retrieval (the model is multilingual, but untested on German notes)
+
+## Later / parked
+
+- [ ] Quality gate (`rag lint` / CI): no empty notes, `STANDARDS.md` naming, folder, tags, no secrets
+- [ ] Stale-note detection; usage logging to find missing docs
+- [ ] Remove real AWS account ID and company hostnames from the public repo
+- [ ] Tell users that search results go to the AI host's model, so notes must hold no secrets
+- [ ] Windows support (scripts are `sh`; untested)
+- [ ] Shared index for a very large team (LanceDB on object storage), only if needed
+
+## Decisions
+
+- Store: LanceDB (embedded). Rejected: SQLite+NumPy (no vector index, slow at scale), Chroma (not
+  process-safe), FAISS (library only), Qdrant (embedded mode is dev-only; server needs a container).
+- Types are tags for humans; search never depends on them.
+- The index is the `main` branch (set `BRAIN_BRANCH` if your team's is called otherwise), whichever
+  branch is checked out: sync, search and status read its tip straight from git. A branch is only for
+  writing and committing notes; your own commits never reach the index until a PR is merged and you
+  update `main`. A rename is a delete + add. Hooks are an optimisation; correctness comes from the
+  marker-vs-`main` check every search does.
+- Notes are read from the synced commit (`git cat-file`), never the working tree: a dirty tree or a
+  pull in progress cannot leak WIP. A note that fails (empty, too big, not UTF-8) fails the same way
+  every time, so it is retried when a commit changes it.
+- One marker file in `.rag/` holds the settings fingerprint and the last indexed commit. Different
+  settings (model, chunk size, the chunker's code) or a lost table rebuild the index from the notes.
+- After pulling code changes, restart the MCP server (restart your AI tool): a process that kept old
+  code and a fresh `rag sync` would each rebuild the index in turn (wasteful, never wrong).
+- Queries return every chunk (not note) within `score_margin` (0.10) of the best, up to `max_results` (10); the best is always kept.
+  Model choice, measured on a 353-chunk mock vault (70 notes, 85 questions, near-duplicate topics):
+  arctic-embed-m-v2.0 has the best recall (hit@5 0.88, MRR 0.69) vs bge-small (0.71, 0.56) and
+  arctic-m v1 (0.83, 0.68); it is also faster (int8) and multilingual. Qwen3-Embedding-0.6B has the
+  best hit@1 (0.66) but lower hit@5 (0.78), is 2x slower and needs a custom ONNX runtime. EmbeddingGemma
+  has a non-Apache license. Rejected: per-note cap (hurts recall), BM25 hybrid (no gain on paraphrased
+  questions), absolute score floor (kills recall), cross-encoder reranker (+0.04 MRR, 145 ms/query).
+  Vectors are kept at the model's full 768 dimensions: truncating to 256 saved 3x disk for 0.02 of hit@5, which was not worth numpy and a second margin. Memory is 1.4 GB per process whatever the file or session setting (measured). Chunk size (1000 chars) was not re-tuned for this model: a candidate for `rag eval`.

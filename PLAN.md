@@ -65,6 +65,8 @@ Then:
 - Store: LanceDB (embedded). Rejected: SQLite+NumPy (no vector index, slow at scale), Chroma (not
   process-safe), FAISS (library only), Qdrant (embedded mode is dev-only; server needs a container).
 - Types are tags for humans; search never depends on them.
+- A batch of notes is replaced in one atomic `merge_insert`: a search sees the old chunks or the new
+  ones, never a note with none, and each batch makes one version instead of two.
 - The index is the `main` branch (set `BRAIN_BRANCH` if your team's is called otherwise), whichever
   branch is checked out: sync, search and status read its tip straight from git. A branch is only for
   writing and committing notes; your own commits never reach the index until a PR is merged and you

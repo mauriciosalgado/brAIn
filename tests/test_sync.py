@@ -356,11 +356,15 @@ def test_a_sync_interrupted_before_the_marker_is_repeated_without_duplicates(
     (vault / "aws-keys.md").write_text(AWS)
     commit()
 
-    def crash(*_args):
-        raise OSError("killed")
+    record = Index.set_indexed_commit
+
+    def killed_while_recording_the_commit(self, commit):
+        if commit:
+            raise OSError("killed")
+        record(self, commit)  # setting up an empty index is not what is interrupted
 
     with monkeypatch.context() as patch:
-        patch.setattr(Index, "set_indexed_commit", crash)
+        patch.setattr(Index, "set_indexed_commit", killed_while_recording_the_commit)
         with pytest.raises(OSError):
             rag.sync()
     assert chunk_count() == PER_NOTE  # the notes were written...

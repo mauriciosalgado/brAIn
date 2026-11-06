@@ -37,8 +37,10 @@ class EmbeddedNote(NamedTuple):
     vectors: list[list[float]]
 
 
-def _quote(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"
+def _chunks_of(sources: list[str]) -> str:
+    """A filter that matches every chunk of these notes."""
+    quoted = ", ".join("'" + source.replace("'", "''") + "'" for source in sources)
+    return f"source IN ({quoted})"
 
 
 class Index:
@@ -49,13 +51,11 @@ class Index:
         self._table = self._open()
 
     def _open(self):
-        built_here = (
-            self._read_marker()[0] == config.FINGERPRINT and TABLE in self._db.list_tables().tables
-        )
-        if not built_here:
+        fingerprint, _ = self._read_marker()
+        if fingerprint != config.FINGERPRINT or TABLE not in self._db.list_tables().tables:
             # Built with other settings, lost, or not set up yet: start afresh.
             self._db.drop_table(TABLE, ignore_missing=True)
-            self._write_marker("")
+            self.set_indexed_commit("")
         return self._db.create_table(TABLE, schema=SCHEMA, exist_ok=True)
 
     def _read_marker(self) -> tuple[str, str]:
@@ -66,17 +66,15 @@ class Index:
             return "", ""
         return fingerprint, commit
 
-    def _write_marker(self, commit: str) -> None:
-        temporary = self._marker.with_suffix(f".{os.getpid()}")
-        temporary.write_text(f"{config.FINGERPRINT}\n{commit}")
-        os.replace(temporary, self._marker)  # atomic
-
     def indexed_commit(self) -> str | None:
         """The git commit the index matches, or None if nothing has been indexed yet."""
         return self._read_marker()[1] or None
 
     def set_indexed_commit(self, commit: str) -> None:
-        self._write_marker(commit)
+        """Record the commit the index matches ("" for none), with the current settings."""
+        temporary = self._marker.with_suffix(f".{os.getpid()}")
+        temporary.write_text(f"{config.FINGERPRINT}\n{commit}")
+        os.replace(temporary, self._marker)  # atomic
 
     def sources(self) -> set[str]:
         """The path of every indexed note."""
@@ -84,35 +82,45 @@ class Index:
         return set(rows.column("source").to_pylist())
 
     def replace_notes(self, notes: list[EmbeddedNote]) -> None:
-        """Swap the chunks of several notes at once. Every write to LanceDB creates a new data
-        fragment, so callers batch notes instead of writing them one by one."""
+        """Store these notes in place of what the index holds for them, in one atomic write: a
+        search sees the old chunks or the new ones, never a note with none. Every write creates
+        data files, so callers pass several notes at a time."""
         rows = [
             {
-                "source": source,
+                "source": note.source,
                 "chunk_index": chunk.chunk_index,
                 "header_path": chunk.header_path,
                 "text": chunk.text,
                 "vector": vector,
             }
-            for source, chunks, vectors in notes
-            for chunk, vector in zip(chunks, vectors, strict=True)
+            for note in notes
+            for chunk, vector in zip(note.chunks, note.vectors, strict=True)
         ]
-        self.delete_notes([note.source for note in notes])
-        if rows:
-            self._table.add(rows)
+        (
+            self._table.merge_insert(["source", "chunk_index"])
+            .when_matched_update_all()
+            .when_not_matched_insert_all()
+            .when_not_matched_by_source_delete(_chunks_of([note.source for note in notes]))
+            .execute(rows)
+        )
 
     def delete_notes(self, sources: list[str]) -> None:
         if sources:
-            self._table.delete(f"source IN ({', '.join(_quote(s) for s in sources)})")
+            self._table.delete(_chunks_of(sources))
 
     def count(self) -> int:
         return self._table.count_rows()
 
     def search(self, vector: list[float], limit: int) -> list[dict]:
-        """The `limit` chunks most similar to `vector`, best first."""
-        query = self._table.search(vector).metric("cosine").limit(limit)
-        if self._has_vector_index():
-            query = query.nprobes(config.SEARCH_NPROBES).refine_factor(config.SEARCH_REFINE_FACTOR)
+        """The `limit` chunks most similar to `vector`, best first. The two tuning settings only
+        apply when there is a vector index (large indexes); without one the scan is exact."""
+        query = (
+            self._table.search(vector)
+            .metric("cosine")
+            .limit(limit)
+            .nprobes(config.SEARCH_NPROBES)
+            .refine_factor(config.SEARCH_REFINE_FACTOR)
+        )
         return [
             {
                 "text": row["text"],
@@ -128,12 +136,11 @@ class Index:
 
     def maintain(self) -> None:
         """Keep search fast as the index grows and changes."""
-        if self.count() >= config.INDEX_AFTER_ROWS and not self._has_vector_index():
+        rows = self.count()
+        if rows >= config.INDEX_AFTER_ROWS and not self._has_vector_index():
             self._table.create_index(
                 "vector",
-                config=IvfHnswSq(
-                    distance_type="cosine", num_partitions=max(8, int(self.count() ** 0.5 / 2))
-                ),
+                config=IvfHnswSq(distance_type="cosine", num_partitions=max(8, int(rows**0.5 / 2))),
                 name=VECTOR_INDEX,
             )
         # Merges small files, adds new rows to the vector index, drops old versions: it costs

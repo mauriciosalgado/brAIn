@@ -1,6 +1,6 @@
 # Standards
 
-This document defines the standards for categorizing and naming notes in this knowledge base. It covers folder structure, file naming conventions and tagging strategy with some examples and a template for new documents.
+This document defines the standards for categorizing and naming notes in this knowledge base. It covers folder structure, file naming conventions, tagging strategy and how a note is laid out. Start new notes from a file in `templates/`.
 
 > [!NOTE]
 > All notes should be created in Markdown format and follow the naming and tagging conventions outlined in this document to ensure consistency and ease of navigation across our knowledge base.
@@ -16,7 +16,7 @@ This document defines the standards for categorizing and naming notes in this kn
   * [Domains](#domains)
   * [Domain vs Tag Strategy](#domain-vs-tag-strategy)
 - [Tags](#tags)
-- [Document Template](#document-template)
+- [Title and Structure](#title-and-structure)
 - [Scripts & Runbooks](#scripts--runbooks)
 
 <!-- tocstop -->
@@ -139,27 +139,12 @@ The **type** says what kind of note it is (one per note) and matches its folder.
 | `incident`     | `incidents/`    |
 | `team`         | `team/`         |
 
-## Document Template
+## Title and Structure
 
-> [!NOTE]
-> For now, Table of Contents and Links are optional
-
-Keep in mind the title should reflect the filename, without the "-" and with proper capitalization.
-
-```markdown
-# {{TITLE}}
-
-Description of the note
-
-Links: [[related-note]]
-Tags: #domain #type
-
-## Table of Contents
-
-## Example Heading
-
-## References
-```
+- The `# Title` reflects the filename, without the "-" and with proper capitalization.
+- Under the title: a short description, then `Links:` (optional) and `Tags:`.
+- A `## Table of Contents` and `Links` are optional for now. A `## References` section goes last.
+  Search skips References and Table of Contents, so they add no noise.
 
 ## Scripts & Runbooks
 

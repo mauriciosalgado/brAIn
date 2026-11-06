@@ -1,61 +1,53 @@
 # AGENTS.md
 
-Guidance for AI agents (Copilot, Claude, ...) working with a **brAIn** knowledge base. For humans,
-see `README.md`.
+brAIn is a knowledge base: Markdown notes in `notes/`, searched through a local index and exposed
+over MCP. One person or a team uses it. For humans, see `README.md`. This file is the only place
+with instructions for agents.
 
-brAIn is a team knowledge base: Markdown notes in `notes/`, written to one standard, searched
-through a local index that is exposed to agents as an MCP server. No cloud, no API keys.
+## Using the knowledge base
 
-## Find information
+Use the brAIn MCP tools: `search_notes`, `read_note`, `get_note_standards` and
+`get_note_template`. Their descriptions say when to use each. Without MCP, run `uv run rag query "question"` to search, and
+read `STANDARDS.md` and `templates/` before writing a note.
 
-Use the MCP tool **`search_notes`** for any question about how the team works or how its systems
-are set up. It returns the most relevant passages, best first, each with its note path (`source`)
-and section. Answer from the passages and **cite the source path**. The passages are ranked by
-similarity, so they may not answer the question: say so when they do not.
+Rules for writing notes that the standard does not cover:
 
-Without MCP, run `uv run rag query "question"`.
-
-## Write or edit a note
-
-1. Call **`get_note_standards`** (or read `STANDARDS.md`) and follow it. It is the only place the
-   rules are written, and it also says where the notes folder is.
-2. Call **`get_note_template`** (or read `templates/`), for example `note` or `runbook`.
-3. Create the note **inside this repository's `notes/` folder**, using the full path from the
-   standards. Never create it in your current directory, even if that is another project.
-4. Work on a new git branch, not on the main branch. A note becomes searchable once it is merged
-   into main and the developer has pulled. Do not run `rag sync` to make it appear.
-5. Never invent facts. If you are unsure, leave a clear `TODO` for a person.
-
-## Repo map
-
-| Path | What it is | Touch it when |
-|------|------------|---------------|
-| `notes/` | The knowledge base | creating, editing or auditing notes |
-| `templates/` | Note starting points | starting a new note |
-| `STANDARDS.md` | Naming, folders, tags | read before creating notes |
-| `brain.toml` | Team settings (branch, search, chunking) | a team wants different behaviour |
-| `rag/` | The search code | changing how indexing or search works |
-| `rag/config.py` | Internal settings and the loader for `brain.toml` | adding a setting |
-| `rag/mcp/server.py` | The MCP tools | changing what agents can call |
+- **Search first.** If a note on the topic exists, update it instead of adding a duplicate, and
+  link the related notes.
+- **Never invent facts.** If you are unsure, leave a clear `TODO` for a person.
+- **No secrets** in notes. Keep runbooks generic: no hardcoded paths, accounts or hosts.
+- **Create notes on a new branch**, not on the main branch, and leave committing and merging to the
+  user unless they ask you to.
+- **Only the main branch is indexed.** Do not run `rag sync` to make a draft appear.
 
 ## Working on the code
 
+Run these from the repository root. The first run needs internet once, to download the search model
+(about 320 MB).
+
 ```bash
-uv sync                  # install dependencies
-uv run pytest            # tests
-uvx ruff check .         # lint
-./doctor.sh              # check the installation
+./setup.sh            # install, download the model, index the notes (once)
+uv run pytest         # all tests, about a minute; they use the real model
+uvx ruff check .      # lint; also run: uvx ruff format --check rag tests
+uv run ty check rag   # types
+./doctor.sh           # check the installation
 ```
 
-- Settings a team might change belong in `brain.toml` and are read at run time. Add them to
-  `_TEAM_DEFAULTS` in `rag/config.py` with a validation rule and a test. Everything else lives in
-  `rag/config.py`, not inline.
+| Path | What it is |
+|------|------------|
+| `rag/notes/` | Getting text out of the repository: `git.py` (plain git: branch tip, changes, file contents), `vault.py` (which files are notes, and their text on the searched branch), `chunker.py` (note to passages) |
+| `rag/index/` | The searchable index: `embeddings.py` (text to vectors), `store.py` (the LanceDB table), `indexer.py` (keeps it in line with git), `search.py` (question to passages) |
+| `rag/` | `config.py` (settings), `cli.py` (the `rag` command), `mcp/server.py` (the tools for agents) |
+| `brain.toml` | Settings the user may change. Read at run time. |
+| `STANDARDS.md`, `templates/` | How notes are written. Served to agents by the tools. |
+| `setup.sh`, `doctor.sh`, `.githooks/` | Install, check, and the hooks that sync the index after a pull |
+| `tests/` | Tests, laid out like `rag/`. `tests/fixtures/` holds sample notes used to test the chunker. |
+
+Conventions:
+
+- A setting a user might change goes in `brain.toml`: add it to `_DEFAULTS` in
+  `rag/config.py` with a validation rule and a test. Anything else lives in `rag/config.py`.
 - Notes are read from the main branch's commit with git, never from the working tree.
-- Keep the code simple. Do not add workarounds for situations this project does not have.
-
-## Golden rules
-
-1. Follow `STANDARDS.md` for every note.
-2. **No secrets** in notes or code. This repository is shared.
-3. Keep runbooks generic: no hardcoded paths, accounts or hosts.
-4. `.rag/` is a local, rebuildable index. Never commit it.
+- Keep the code simple and write only what the project needs. Add no workaround for a situation it
+  does not have.
+- Never commit `.rag/` (the local index).

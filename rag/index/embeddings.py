@@ -1,4 +1,5 @@
 import shutil
+from functools import cache
 
 from fastembed import TextEmbedding
 from fastembed.common.model_description import ModelSource, PoolingType
@@ -13,7 +14,7 @@ from rag.config import (
     QUERY_PREFIX,
 )
 
-# fastembed does not list this model, so it is registered: CLS pooling, normalized vectors.
+# fastembed does not list this model, so it is registered here.
 TextEmbedding.add_custom_model(
     MODEL,
     PoolingType.CLS,
@@ -26,20 +27,16 @@ TextEmbedding.add_custom_model(
     additional_files=MODEL_FILES,
 )
 
-_model: TextEmbedding | None = None
 
-
+@cache
 def get_model() -> TextEmbedding:
-    global _model
-    if _model is None:
-        try:
-            _model = TextEmbedding(MODEL, cache_dir=MODEL_CACHE_DIR)
-        except Exception as error:  # fastembed raises many types for download problems
-            raise RuntimeError(
-                f"Could not load the embedding model {MODEL}. The first run downloads it "
-                f"(about 320 MB) into {MODEL_CACHE_DIR}, so it needs internet once: {error}"
-            ) from error
-    return _model
+    try:
+        return TextEmbedding(MODEL, cache_dir=MODEL_CACHE_DIR)
+    except Exception as error:  # fastembed raises many types for download problems
+        raise RuntimeError(
+            f"Could not load the embedding model {MODEL}. The first run downloads it "
+            f"(about 320 MB) into {MODEL_CACHE_DIR}, so it needs internet once: {error}"
+        ) from error
 
 
 def model_works() -> bool:
@@ -52,11 +49,10 @@ def model_works() -> bool:
 
 
 def ensure_model() -> None:
-    """Make the model available: keep a working one, else download it again from scratch."""
-    global _model
+    """Keep a working model, or else download it again from scratch."""
     if model_works():
         return
-    _model = None
+    get_model.cache_clear()
     shutil.rmtree(MODEL_CACHE_DIR, ignore_errors=True)  # a damaged download is not resumed
     get_model()
     if not model_works():
@@ -64,10 +60,8 @@ def ensure_model() -> None:
 
 
 def embed_documents(texts: list[str]) -> list[list[float]]:
-    """Embed texts, returned in input order.
-
-    Texts are processed shortest first, so each batch has similar lengths and little padding.
-    """
+    """The vector of each text, in input order. Texts are embedded shortest first, so a batch holds
+    texts of similar length and needs little padding."""
     order = sorted(range(len(texts)), key=lambda i: len(texts[i]))
     vectors = get_model().embed([texts[i] for i in order], batch_size=EMBED_BATCH_SIZE)
     result: list[list[float]] = [[] for _ in texts]

@@ -5,16 +5,20 @@ the index was built with and the git commit it matches. The commit is written la
 interrupted sync is simply repeated.
 """
 
+import hashlib
 import os
+from contextlib import contextmanager
 from datetime import timedelta
+from pathlib import Path
 from typing import NamedTuple
 
 import lancedb
 import pyarrow as pa
+from filelock import FileLock
 from lancedb.index import IvfHnswSq
 
 from rag import config
-from rag.chunker import Chunk
+from rag.notes import chunker
 
 TABLE = "chunks"
 SCHEMA = pa.schema(
@@ -28,12 +32,35 @@ SCHEMA = pa.schema(
 )
 VECTOR_INDEX = "vector_idx"
 
+# Everything that decides what is stored. When it changes, the index is rebuilt from the notes.
+FINGERPRINT = hashlib.sha256(
+    repr(
+        (
+            config.MODEL,
+            config.EMBEDDING_SIZE,
+            config.MAX_CHUNK_SIZE,
+            config.MIN_CHUNK_SIZE,
+            tuple(config.SKIP_HEADINGS),
+            tuple(config.SKIP_FOLDERS),
+            Path(chunker.__file__).read_bytes(),
+        )
+    ).encode()
+).hexdigest()
+
+
+@contextmanager
+def write_lock():
+    """Only one process changes the index at a time (LanceDB supports a single writer). Waits."""
+    config.RAG_DIR.mkdir(parents=True, exist_ok=True)
+    with FileLock(config.LOCK_PATH):
+        yield
+
 
 class EmbeddedNote(NamedTuple):
     """A note ready to be stored: its path, its chunks and one vector per chunk."""
 
     source: str
-    chunks: list[Chunk]
+    chunks: list[chunker.Chunk]
     vectors: list[list[float]]
 
 
@@ -43,7 +70,7 @@ def _chunks_of(sources: list[str]) -> str:
     return f"source IN ({quoted})"
 
 
-class Index:
+class Store:
     def __init__(self) -> None:
         config.DB_DIR.mkdir(parents=True, exist_ok=True)
         self._db = lancedb.connect(config.DB_DIR)
@@ -52,9 +79,11 @@ class Index:
 
     def _open(self):
         fingerprint, _ = self._read_marker()
-        if fingerprint != config.FINGERPRINT or TABLE not in self._db.list_tables().tables:
+        exists = TABLE in self._db.list_tables().tables
+        if fingerprint != FINGERPRINT or not exists:
             # Built with other settings, lost, or not set up yet: start afresh.
-            self._db.drop_table(TABLE, ignore_missing=True)
+            if exists:
+                self._db.drop_table(TABLE)
             self.set_indexed_commit("")
         return self._db.create_table(TABLE, schema=SCHEMA, exist_ok=True)
 
@@ -73,7 +102,7 @@ class Index:
     def set_indexed_commit(self, commit: str) -> None:
         """Record the commit the index matches ("" for none), with the current settings."""
         temporary = self._marker.with_suffix(f".{os.getpid()}")
-        temporary.write_text(f"{config.FINGERPRINT}\n{commit}")
+        temporary.write_text(f"{FINGERPRINT}\n{commit}")
         os.replace(temporary, self._marker)  # atomic
 
     def sources(self) -> set[str]:

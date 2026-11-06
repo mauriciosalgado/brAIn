@@ -8,18 +8,17 @@ Rules: keep it simple · measure before adding · nothing is committed without t
 ## Done
 
 - [x] Note standards, templates, runbooks keep state in `/tmp` (`STANDARDS.md`, `templates/`)
-- [x] Chunker: heading-aware, code fences and tables kept valid (`rag/chunker.py`). Tested on a 70-note team
-      vault + 12 messy real-world notes (`tests/fixtures/`), and fuzzed with 1.7M mutated documents
-      (shuffled, cut, spliced, injected markup): size limit, no text lost, fences valid, headings findable
+- [x] Chunker: one chunk per heading (`rag/notes/chunker.py`, 190 lines); long sections are split at paragraph, line or word
+      breaks. Checked on a 70-note team vault + 12 messy notes (`tests/fixtures/`): size limit, no text lost
 - [x] Embedder: arctic-embed-m-v2.0 int8 (multilingual, Apache-2.0, 320 MB, registered as a fastembed custom model), small batches, query prefix, model cached in `.rag/models`, repaired by `rag model`
 - [x] Local index: LanceDB in `.rag/`, exact scan below 50k chunks, IVF-HNSW above
 - [x] Index follows git: what git reports as A / M / D since the last indexed commit is indexed / re-indexed /
-      removed (`rag/git.py`); one marker (the commit) says if the index is fresh
+      removed (`rag/notes/git.py`, `rag/notes/vault.py`); one marker (the commit) says if the index is fresh
 - [x] Git flow: `.githooks/` + `setup.sh` + `doctor.sh`; every search also compares the marker with the tip of `main` (17 ms)
 - [x] Notes with no content (empty, title only) or unreadable are reported, never silently skipped
-- [x] MCP tool `search_notes` (bounded `k`, clear errors) and CLI `rag sync | query | status | model | reset`
-- [x] Proven at 200,000 chunks (5 ms search; 1.8 GB on disk at 768 dims, about 3x less at the 256 used now); 20,000 notes: a pull of 15 changed
-      notes syncs in 0.1 s; 709 tests. First index costs about 22 ms per chunk (100k chunks is about 35 min)
+- [x] MCP tool `search_notes` (bounded `k`, clear errors) and CLI `rag sync | query | status | model`
+- [x] Proven at 200,000 chunks (5 ms search; 1.8 GB on disk); 20,000 notes: a pull of 15 changed
+      notes syncs in 0.1 s; 273 tests. First index costs about 22 ms per chunk (100k chunks is about 35 min)
 
 ## Next (in order)
 
@@ -42,9 +41,11 @@ Then:
 - [ ] Exact-identifier boost (`aws-rds-copy`, error codes, flags): BM25 hybrid gave no gain on paraphrased
       questions, but identifier queries were not measured
 - [x] MCP `search_notes` returns plain text: one `<passage rank source section>` block per chunk, text unescaped
-- [ ] MCP tools for the vault itself (no similarity): `read_note(path)` (read from `main`), `list_notes(folder)`
-- [x] `brain.toml`: team settings in the repo (branch, skipped headings, result count, score margin, chunk
-      sizes), read at run time and validated; `BRAIN_BRANCH` stays as a personal override
+- [x] MCP `read_note(path)`: a whole note from the searched branch, only paths git lists as notes
+- [ ] MCP `list_notes(folder)`
+- [x] `brain.toml`: the settings a user may change (branch, skipped folders and headings, result count, score
+      margin, chunk sizes), commented in plain words, read at run time and validated; `BRAIN_BRANCH` is a
+      personal override. The model and vector size stay in code on purpose.
 - [ ] MCP: the first search on a big unindexed vault must not block for minutes (a host times out): say
       "index is building" and answer from what exists
 - [x] Agent authoring help: MCP tools `get_note_standards` and `get_note_template`
@@ -65,6 +66,12 @@ Then:
 - Store: LanceDB (embedded). Rejected: SQLite+NumPy (no vector index, slow at scale), Chroma (not
   process-safe), FAISS (library only), Qdrant (embedded mode is dev-only; server needs a container).
 - Types are tags for humans; search never depends on them.
+- Works for one person or a team: alone, commit on the searched branch and the next search sees it; in a
+  team, notes are searchable once merged there. Docs and tools say "your notes", not "the team's".
+- Instructions have one home each: the MCP tool descriptions (how to use the tools), `STANDARDS.md` (the
+  rules, served by `get_note_standards`), `AGENTS.md` (working in the repo), and
+  `.github/copilot-instructions.md`, which only points to `AGENTS.md`. Written after GitHub's custom
+  instructions docs, agents.md and Anthropic's "Writing tools for agents".
 - A batch of notes is replaced in one atomic `merge_insert`: a search sees the old chunks or the new
   ones, never a note with none, and each batch makes one version instead of two.
 - The index is the `main` branch (set `BRAIN_BRANCH` if your team's is called otherwise), whichever

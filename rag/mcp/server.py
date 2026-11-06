@@ -1,18 +1,19 @@
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
-import rag
 from rag import config
+from rag.index import search
+from rag.notes import vault
 
 READ_ONLY = {"readOnlyHint": True, "openWorldHint": False}
 
 mcp = FastMCP(
     "brAIn",
     instructions=(
-        "brAIn is the team's knowledge base: Markdown notes in a git repository. Use search_notes "
-        "to answer questions about how the team works, and cite the note path. To write or edit a "
-        "note, first call get_note_standards and get_note_template and follow them. Create the "
-        "note in the notes folder they name, never in the current directory."
+        "brAIn gives access to a knowledge base: Markdown notes in a git repository. To answer a "
+        "question about what the notes say, call search_notes, answer from the passages and cite "
+        "their paths; call read_note if a passage is cut off. To write or edit a note, first call "
+        "get_note_standards and get_note_template and follow them."
     ),
 )
 
@@ -31,29 +32,47 @@ def format_passages(hits: list[dict]) -> str:
     )
     noun = "passage" if len(hits) == 1 else "passages"
     return (
-        f"{len(hits)} {noun} from the team's notes, best match first. Ranked by similarity, so "
-        f"they may not answer the question. Cite the source path; paths are relative to "
-        f"{config.ROOT}.\n\n{passages}"
+        f"{len(hits)} {noun}, best match first, ranked by similarity: they may not answer the "
+        f"question. If they do not, search again with other words. Cite the source path (relative "
+        f"to {config.ROOT}).\n\n{passages}"
     )
 
 
 @mcp.tool(title="Search notes", output_schema=None, annotations=READ_ONLY)
-def search_notes(query: str, k: int = config.MAX_RESULTS) -> str:
-    """Search the team's notes and return the most relevant passages.
+def search_notes(query: str, max_results: int = config.MAX_RESULTS) -> str:
+    """Search the notes by meaning and return the most relevant passages.
 
-    Use it for questions about how the team works or how its systems are set up: runbooks,
-    architecture, decisions, handbook, incidents.
+    Use it whenever the answer may be in the user's notes: how something is done, why it was
+    decided, how a system is set up, what happened in an incident. Prefer several short, specific
+    searches over one broad one.
 
     Args:
-        query: What to look for, in plain words.
-        k: The most passages to return. Fewer come back when the rest match much worse.
+        query: What to look for, as a question or a short description, for example
+            "how do we rotate AWS access keys".
+        max_results: The most passages to return. Fewer come back when the rest match much worse.
 
     Returns:
         Passages, best match first, each with its note path (`source`) and `section`.
     """
     try:
-        return format_passages(rag.query(query, n_results=max(1, min(k, config.MAX_RESULTS))))
+        passages = search.query(query, max_results=max(1, min(max_results, config.MAX_RESULTS)))
+        return format_passages(passages)
     except (ValueError, RuntimeError) as error:  # empty query, no notes, model not available
+        raise ToolError(str(error)) from error
+
+
+@mcp.tool(title="Read note", output_schema=None, annotations=READ_ONLY)
+def read_note(path: str) -> str:
+    """Read a whole note.
+
+    Use it when a passage from search_notes is cut off, or when you need the rest of the note.
+
+    Args:
+        path: The note's path, as given by search_notes, for example "notes/handbook/keys.md".
+    """
+    try:
+        return vault.read_note(path)
+    except (ValueError, RuntimeError) as error:  # not a note, or no such branch
         raise ToolError(str(error)) from error
 
 
@@ -67,9 +86,10 @@ def _templates() -> dict[str, str]:
 
 @mcp.tool(title="Get note standards", output_schema=None, annotations=READ_ONLY)
 def get_note_standards() -> str:
-    """Get the team's rules for writing a note: where it goes, its file name, title and tags.
+    """Get the rules for writing a note: its folder, file name, title and tags.
 
-    Call it before creating or editing a note. It also says where the notes folder is.
+    Call it before creating or editing a note, and follow it. It also gives the full path of the
+    notes folder.
     """
     try:
         standards = (config.ROOT / "STANDARDS.md").read_text()
@@ -78,23 +98,26 @@ def get_note_standards() -> str:
     return (
         f"Where notes live: {config.NOTES_DIR}\n"
         f"Create a new note at {config.NOTES_DIR}/<folder>/<file-name>.md, using this full path, "
-        f"not the current directory. Do it on a new git branch, not on {config.BRANCH}: a note "
-        f"becomes searchable once it is merged into {config.BRANCH}.\n"
+        f"not the current directory.\n"
+        f"Notes are searchable once they are on the {config.BRANCH} branch. Unless the user says "
+        f"otherwise, create the note on a new branch, not on {config.BRANCH}, and leave "
+        f"committing and merging to them.\n"
         f"Templates: {', '.join(sorted(_templates())) or 'none'} (see get_note_template).\n\n"
         f"{standards}"
     )
 
 
 @mcp.tool(title="Get note template", output_schema=None, annotations=READ_ONLY)
-def get_note_template(name: str = "note") -> str:
-    """Get a template for a new note, such as `note` or `runbook`.
+def get_note_template(template: str = "note") -> str:
+    """Get a template for a new note: `note` for most notes, `runbook` for runnable procedures.
 
-    Fill it in and follow the standards: replace `{{title}}` and set the tags.
+    Fill it in as the standards say: replace `{{title}}` and set the tags. The other templates
+    are listed by get_note_standards.
     """
     templates = _templates()
-    if name not in templates:
-        raise ToolError(f"No template '{name}'. Available: {', '.join(sorted(templates))}")
-    return templates[name]
+    if template not in templates:
+        raise ToolError(f"No template '{template}'. Available: {', '.join(sorted(templates))}")
+    return templates[template]
 
 
 def main() -> None:

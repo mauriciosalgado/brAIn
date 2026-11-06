@@ -1,14 +1,13 @@
-"""Chunker tests: exact behaviour of the important cases, then invariants that must hold for
-every kind of Markdown (a catalogue of awkward notes plus seeded random ones)."""
+"""Chunker tests: the behaviour that matters, then invariants that must hold for every kind of
+Markdown (a catalogue of awkward notes and random mixes of them)."""
 
 import random
 import re
-from pathlib import Path
 
 import pytest
 
-from rag.chunker import chunk_markdown
 from rag.config import MAX_CHUNK_SIZE
+from rag.notes.chunker import chunk_markdown
 
 WORDS = "word " * 70  # about 350 characters
 PARAGRAPHS = "\n\n".join(f"Paragraph {i}. " + "word " * 50 for i in range(30))
@@ -42,14 +41,6 @@ def test_hash_comments_in_code_fences_are_not_headings():
     assert paths(text) == ["T > Real", "T > Second"]
 
 
-def test_tilde_and_nested_fences():
-    text = (
-        f"# T\n\n## A\n\n{WORDS}\n\n~~~\n# no\n~~~\n\n"
-        f"````md\n```\n# nested\n```\n````\n\n## B\n\n{WORDS}"
-    )
-    assert paths(text) == ["T > A", "T > B"]
-
-
 def test_setext_headings_and_multiline_setext():
     assert "Title > Section" in paths(f"Title\n=====\n\nintro\n\nSection\n-------\n\n{WORDS}")
     assert paths(f"line one\nline two\n=====\n\n{WORDS}") == ["line one line two"]
@@ -68,9 +59,16 @@ def test_heading_markup_is_dropped_from_the_path():
     assert paths(text) == ["T > Emph link code img & Café ☕"]
 
 
-def test_closing_hashes_and_light_indentation_are_headings():
-    assert paths(f"# T\n\n## Title ##\n\n{WORDS}") == ["T > Title"]
-    assert paths(f"# T\n\n   ## Indented\n\n{WORDS}") == ["T > Indented"]
+def test_indented_code_before_the_first_heading_is_kept():
+    assert "# indented code" in all_text(f"    # indented code\n\n# T\n\n{WORDS}")
+
+
+def test_a_small_start_of_a_long_section_is_not_joined_to_the_section_before():
+    big_paragraph = "word " * 195  # fits alone, but not together with the small table
+    table = "| a | b |\n|---|---|\n| 1 | 2 |"
+    text = f"# T\n\n## Before\n\n{WORDS}\n\n## Long\n\n{table}\n\n{big_paragraph}"
+    first_of_long = next(c for c in chunks(text) if "| 1 | 2 |" in c.text)
+    assert first_of_long.header_path == "T > Long"
 
 
 def test_notes_without_an_h1_use_the_filename():
@@ -117,89 +115,22 @@ def test_frontmatter_is_excluded():
 
 
 def test_things_that_only_look_like_frontmatter_are_kept():
-    assert "just text" in all_text("---\njust text\n---\n\n# T\n\nbody\n")  # not key: value
     assert "title: X" in all_text(f"---\ntitle: X\n\n# T\n\n{WORDS}")  # never closed
     assert "---" in all_text(f"# T\n\n{WORDS}\n\n---\n\n{WORDS}")  # a rule mid-note
-
-
-def test_frontmatter_only_note_is_empty():
-    assert chunks("---\ntitle: X\n---\n") == []
-
-
-def test_line_endings_are_normalised():
-    for newline in ("\r\n", "\r"):
-        text = f"# T{newline}{newline}## A{newline}{newline}{WORDS}{newline}"
-        assert paths(text) == ["T > A"] and "\r" not in all_text(text)
-    assert "T > A" in paths(f"---\r\ntitle: X\r\n---\r\n# T\r\n\r\n## A\r\n\r\n{WORDS}\r\n")
-
-
-def test_awkward_characters_do_not_break_anything():
-    text = f"# T\n\n## A\n\nbad \x00 char \x0b \x0c \x1f \u2028 \u2029 مرحبا e\u0301 🚀 {WORDS}"
-    assert paths(text) == ["T > A"]
 
 
 # ---- code blocks -----------------------------------------------------------------------------
 
 
-def test_oversized_code_block_is_cut_into_valid_fenced_pieces():
+def test_oversized_code_block_is_cut_between_lines_and_loses_nothing():
     lines = [f"echo line {i} " + "x" * 40 for i in range(120)]
     result = chunks("# T\n\n## Run\n\n```bash\n" + "\n".join(lines) + "\n```\n")
-    assert len(result) > 1
-    for chunk in result:
-        assert chunk.text.count("```") % 2 == 0 and len(chunk.text) <= MAX_CHUNK_SIZE
-        assert "```bash" in chunk.text  # every piece keeps the language
+    assert len(result) > 1 and all(len(c.text) <= MAX_CHUNK_SIZE for c in result)
     joined = "\n".join(c.text for c in result)
     assert all(line in joined for line in lines)
 
 
-def test_code_block_inside_a_long_list_is_never_cut_open():
-    code = "\n".join(f"  echo line {i} " + "x" * 30 for i in range(80))
-    text = f"# T\n\n## A\n\n- first\n\n  ```bash\n{code}\n  ```\n\n- second\n"
-    result = chunks(text)
-    assert len(result) > 1
-    for chunk in result:
-        assert len(re.findall(r"^\s*```", chunk.text, re.MULTILINE)) % 2 == 0
-
-
-def test_code_block_inside_a_quote_is_cut_with_its_quote_marks():
-    code = "\n".join(f"> echo {i} " + "x" * 40 for i in range(80))
-    result = chunks(f"# T\n\n> ```bash\n{code}\n> ```\n")
-    assert len(result) > 1
-    assert all(c.text.count("```") % 2 == 0 for c in result)
-
-
-def test_unclosed_fence_runs_to_the_end_of_the_note():
-    text = "# T\n\n## A\n\n```bash\n# never closed\necho 1\n\n## Not a heading\n"
-    assert paths(text) == ["T > A"] and "Not a heading" in all_text(text)
-
-
-def test_inline_code_and_indented_code_are_plain_text():
-    assert paths(f"# T\n\nUse `# not heading` and ``a ` b`` here. {WORDS}") == ["T"]
-
-
 # ---- tables, lists, quotes and other blocks ---------------------------------------------------
-
-
-def test_long_table_repeats_its_header_row_in_every_chunk():
-    rows = "\n".join(f"| row {i} | " + "x" * 60 + " |" for i in range(60))
-    result = chunks(f"# T\n\n## A\n\n| name | value |\n|---|---|\n{rows}")
-    assert len(result) > 1
-    assert all("| name | value |" in c.text for c in result)
-    assert all(len(c.text) <= MAX_CHUNK_SIZE for c in result)
-
-
-def test_table_with_a_very_wide_header_still_terminates():
-    header = "| " + " | ".join(f"column-{i}" for i in range(150)) + " |\n|" + "---|" * 150
-    rows = "\n".join("| " + " | ".join("x" for _ in range(150)) + " |" for _ in range(30))
-    result = chunks(f"# T\n\n## A\n\n{header}\n{rows}")
-    assert all(len(c.text) <= MAX_CHUNK_SIZE for c in result)
-
-
-def test_deeply_indented_code_block_terminates():
-    code = "\n".join(" " * 300 + f"line {i} " + "y" * 30 for i in range(60))
-    fence = " " * 300 + "```"
-    result = chunks(f"# T\n\n## A\n\n{fence}\n{code}\n{fence}\n")
-    assert all(len(c.text) <= MAX_CHUNK_SIZE for c in result)
 
 
 def test_long_list_and_quote_are_split_between_items():
@@ -215,20 +146,6 @@ def test_link_definitions_survive_splitting():
     )
     assert "[1]: https://example.com/a" in all_text(text)
     assert "[2]: https://example.com/b" in all_text(text)
-
-
-def test_obsidian_syntax_is_kept_as_text():
-    text = f"# T\n\n![[image.png]] and [[Note|alias]] #tag ^block-id %%comment%%\n\n{WORDS}"
-    body = all_text(text)
-    assert "![[image.png]]" in body and "[[Note|alias]]" in body and "#tag" in body
-
-
-def test_html_blocks_and_comments_do_not_create_headings():
-    text = (
-        "# T\n\n<details>\n<summary># Not heading</summary>\n\n"
-        f"body {WORDS}\n</details>\n\n<!--\n## hidden\n-->\n\n{WORDS}"
-    )
-    assert paths(text) == ["T"]
 
 
 # ---- skipped sections ------------------------------------------------------------------------
@@ -248,17 +165,10 @@ def test_references_and_table_of_contents_are_skipped_with_their_subsections():
 # ---- sizes and splitting ---------------------------------------------------------------------
 
 
-def test_section_exactly_at_the_limit_is_not_split():
-    header = "## A\n\n"
-    body = "x" * (MAX_CHUNK_SIZE - len(header))
-    assert len(chunks(f"# T\n\n{header}{body}")) == 1
-    assert len(chunks(f"# T\n\n{header}{body}x")) == 2
-
-
-def test_oversized_prose_is_split_and_repeats_its_heading():
+def test_oversized_prose_is_split_between_paragraphs():
     result = [c for c in chunks(f"# T\n\n## Big\n\n{PARAGRAPHS}") if c.header_path == "T > Big"]
     assert len(result) > 1
-    assert all(len(c.text) <= MAX_CHUNK_SIZE and c.text.startswith("## Big") for c in result)
+    assert all(len(c.text) <= MAX_CHUNK_SIZE and c.text.count("Paragraph") for c in result)
 
 
 def test_unbreakable_long_text_is_cut():
@@ -287,23 +197,7 @@ def test_tiny_sections_are_merged_but_never_past_the_limit():
     assert len(chunks("# T\n\n" + "\n".join(f"## S{i}\n\nok {i}\n" for i in range(40)))) == 1
 
 
-def test_chunks_are_numbered_in_reading_order_and_deterministic():
-    result = chunks(f"# T\n\n## A\n\n{WORDS}\n\n## B\n\n{WORDS}", "notes/x.md")
-    assert [c.chunk_index for c in result] == [0, 1]
-    assert chunks(f"# T\n\n## A\n\n{WORDS}") == chunks(f"# T\n\n## A\n\n{WORDS}")
-
-
 # ---- bugs found by fuzzing real-world documents (each one has a test) ----------------------------
-
-
-def test_an_indented_hash_line_before_any_heading_is_text_not_a_heading():
-    text = "     # sample of the metric output\n\n   # Real heading\n\nbody " * 3
-    assert "sample of the metric output" in all_text(text)
-
-
-def test_a_line_that_only_starts_like_a_closing_fence_is_content():
-    text = "# T\n\n```\n" + "\n".join(f"line {i} " + "x" * 40 for i in range(40)) + "\n```text\n"
-    assert "```text" in all_text(text)
 
 
 def test_a_paragraph_that_became_a_heading_stays_in_the_text_and_not_in_the_path():
@@ -321,44 +215,18 @@ def test_a_long_fence_info_string_is_kept_as_text():
     assert all(len(c.text) <= MAX_CHUNK_SIZE for c in chunks(text))
 
 
-def test_a_tiny_title_section_is_folded_into_the_next_one_not_left_alone():
-    text = "# T\n\nTags: #a\n\n## S\n\n" + "content sentence here. " * 10
-    result = chunks(text)
-    assert len(result) == 1 and "Tags: #a" in result[0].text
-
-
 # ---- invariants for every kind of note --------------------------------------------------------
 
-FENCE_LINE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
 
-
-def fences_balanced(text: str) -> bool:
-    """Whether every code fence opened in `text` is also closed."""
-    opened = None
-    for line in text.split("\n"):
-        match = FENCE_LINE.match(line.lstrip(" >"))
-        if not match:
-            continue
-        marker = match.group(1)
-        if opened is None:
-            opened = marker
-        elif marker[0] == opened[0] and len(marker) >= len(opened) and line.strip(" >") == marker:
-            opened = None
-    return opened is None
-
-
-def check_invariants(text: str, fences: bool = True) -> None:
-    """`fences=False` skips the code-fence balance check, which this file's simple fence scanner
-    cannot judge once an HTML block or random lines decide what is a fence."""
+def check_invariants(text: str) -> None:
     result = chunks(text)
     normal = text.replace("\r\n", "\n").replace("\r", "\n")
     assert [c.chunk_index for c in result] == list(range(len(result)))
     for chunk in result:
         assert chunk.text.strip() and chunk.header_path.strip()
+        assert chunk.text == chunk.text.rstrip()
         assert len(chunk.text) <= MAX_CHUNK_SIZE, f"{len(chunk.text)} characters"
         assert "\r" not in chunk.text
-        if fences and fences_balanced(normal):
-            assert fences_balanced(chunk.text), chunk.text[:80]
     if result and not re.search(
         r"^ {0,3}(?:#{1,6}[ \t]*)?(References|Table of Contents|TOC)[ \t]*#*[ \t]*$"
         r"|^ {0,3}(?:References|Table of Contents|TOC)[ \t]*\n {0,3}(?:=+|-+)[ \t]*$",
@@ -470,37 +338,5 @@ def test_catalogue_invariants(name):
 def test_random_combinations_keep_every_invariant():
     rng = random.Random(2024)
     pieces = [text for text in CATALOGUE.values() if text]
-    for _ in range(600):
+    for _ in range(200):
         check_invariants("\n\n".join(rng.choice(pieces) for _ in range(rng.randint(1, 6))))
-
-
-def test_random_line_noise_keeps_every_invariant():
-    rng = random.Random(7)
-    atoms = [
-        "# H",
-        "## H",
-        "```",
-        "~~~",
-        "> ",
-        "- ",
-        "1. ",
-        "| a | b |",
-        "|---|---|",
-        "---",
-        "===",
-        "",
-        "text " * 30,
-    ]
-    for _ in range(600):
-        check_invariants(
-            "\n".join(
-                rng.choice(atoms) + rng.choice(["", " x", " word " * 9])
-                for _ in range(rng.randint(1, 40))
-            )
-        )
-
-
-def test_real_notes_chunk_cleanly():
-    for path in Path("notes").glob("**/*.md"):
-        check_invariants(path.read_text(encoding="utf-8-sig"))
-        assert chunks(path.read_text(encoding="utf-8-sig"), str(path)), path

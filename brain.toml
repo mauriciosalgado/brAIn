@@ -1,27 +1,45 @@
-# Team settings for brAIn. This file is committed, so every developer, the git hooks and the MCP
-# server read the same values. Delete a line to get its default (shown here).
-#
-# After changing a setting, nothing else to do: it is read every time brAIn runs, and the notes
-# are re-indexed by themselves when a change needs it.
+# brAIn settings
+# ==============
+# This file is committed, so everyone who uses this repository (you, or your whole team) gets the
+# same settings. Change a value and commit it. Delete a line to get its default (shown below).
+# A mistake, like a typo or a number out of range, stops brAIn with a message that says what to fix.
+# When a change needs the notes to be indexed again, brAIn does it by itself.
 
-# The branch your team merges notes into. Only this branch is searched, whichever branch you have
-# checked out: a note becomes searchable once it is merged here.
-# One person can override it with the BRAIN_BRANCH environment variable.
+
+# ---- What is searched -------------------------------------------------------------------------
+
+# The branch that notes are merged into. Only this branch is searched, whichever branch you have
+# checked out. Working alone? Commit straight to this branch. Working in a team? Notes become
+# searchable after their pull request is merged here.
+# Use "master" or "trunk" if that is what your branch is called.
 branch = "main"
 
-# Sections under these headings are not searched (they only add noise).
+# Folders inside notes/ that are not searched, such as old or unfinished notes.
+# Example: ["archive", "drafts"] skips notes/archive/ and notes/drafts/.
+# Folders that start with a dot, like .trash, are always skipped.
+skip_folders = []
+
+# Sections under these headings are not searched, because they only add noise.
 skip_headings = ["References", "Table of Contents", "TOC"]
 
-# The most passages one search returns (1 to 50). A search returns fewer when the rest match much
-# worse than the best one. More gives an assistant more context and costs it more tokens.
+
+# ---- What a search returns --------------------------------------------------------------------
+
+# The most passages one search returns (1 to 50).
+# Raise it to give your AI assistant more context. Lower it to save its tokens.
 max_results = 10
 
-# How close to the best match a passage must be to be returned (above 0, up to 1). Smaller is
-# stricter: fewer, more precise passages. Larger lets more through.
+# How close to the best match a passage must be to be returned (above 0, up to 1).
+# Lower is stricter: fewer passages, all very relevant. Higher lets more passages through.
 score_margin = 0.10
 
-# A note is cut into passages along its headings. A section longer than max_chunk_size characters
-# is split further (500 to 8000). A section shorter than min_chunk_size joins its neighbour
-# (1 up to half of max_chunk_size). The defaults suit most notes. Changing either re-indexes.
+
+# ---- How notes are cut into passages ----------------------------------------------------------
+# Each note is cut along its headings. These two numbers are in characters. The defaults suit most
+# notes. Changing them re-indexes your notes.
+
+# A section longer than this is split into more passages (500 to 8000).
 max_chunk_size = 1000
+
+# A section shorter than this is joined to its neighbour (1 up to half of max_chunk_size).
 min_chunk_size = 150

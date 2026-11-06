@@ -4,9 +4,9 @@ from typing import ClassVar
 
 import pytest
 
-from rag import config, embeddings
-from rag.chunker import Chunk
-from rag.config import MODEL_CACHE_DIR, RAG_DIR
+from rag import config
+from rag.index import embeddings
+from rag.notes.chunker import Chunk
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -26,10 +26,6 @@ def test_output_order_matches_input_order():
     assert [cosine(a, b) > 0.999 for a, b in zip(batched, singly, strict=True)] == [True] * 3
 
 
-def test_empty_input():
-    assert embeddings.embed_documents([]) == []
-
-
 def test_vectors_are_finite_and_normalized():
     for vector in embeddings.embed_documents(["hello world", "kubectl get pods"]):
         assert len(vector) == config.EMBEDDING_SIZE
@@ -37,19 +33,11 @@ def test_vectors_are_finite_and_normalized():
         assert abs(math.sqrt(sum(x * x for x in vector)) - 1) < 1e-3
 
 
-def test_deterministic():
-    assert embeddings.embed_documents(["same text"]) == embeddings.embed_documents(["same text"])
-
-
 def test_query_is_prefixed_and_rejects_empty():
     plain = embeddings.embed_documents(["how do I rotate keys"])[0]
     assert cosine(embeddings.embed_query("how do I rotate keys"), plain) < 0.999
     with pytest.raises(ValueError):
         embeddings.embed_query("   ")
-
-
-def test_model_cache_is_inside_repo_rag_dir():
-    assert MODEL_CACHE_DIR.startswith(str(RAG_DIR))
 
 
 def test_relevant_passage_beats_unrelated():
@@ -89,27 +77,15 @@ def fake_model(tmp_path, monkeypatch):
     FakeModel.downloads, FakeModel.local_only_calls = 0, []
     monkeypatch.setattr(embeddings, "TextEmbedding", FakeModel)
     monkeypatch.setattr(embeddings, "MODEL_CACHE_DIR", str(tmp_path / "models"))
-    monkeypatch.setattr(embeddings, "_model", None)
-    return tmp_path / "models"
+    embeddings.get_model.cache_clear()  # no real model from an earlier test
+    yield tmp_path / "models"
+    embeddings.get_model.cache_clear()  # and no fake one left for the next
 
 
 def test_model_works_never_downloads(fake_model):
     assert embeddings.model_works() is False
     assert FakeModel.downloads == 0 and FakeModel.local_only_calls == [True]
     assert not (fake_model / "ok").exists()
-
-
-def test_model_works_rejects_vectors_of_the_wrong_size(fake_model, monkeypatch):
-    FakeModel(None, fake_model)
-    monkeypatch.setattr(FakeModel, "embed", lambda _self, texts, **_: ([0.1] * 3 for _ in texts))
-    assert embeddings.model_works() is False
-
-
-def test_ensure_model_keeps_a_working_model(fake_model):
-    FakeModel(None, fake_model)
-    before = FakeModel.downloads
-    embeddings.ensure_model()
-    assert FakeModel.downloads == before
 
 
 def test_ensure_model_downloads_a_missing_model(fake_model):

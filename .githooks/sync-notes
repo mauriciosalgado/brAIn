@@ -1,0 +1,11 @@
+#!/bin/sh
+# Re-index the notes after git changes them (pull, merge, rebase). Runs in the
+# background so git stays fast. Enabled by ./setup.sh.
+root=$(git rev-parse --show-toplevel) || exit 0
+
+# Git clients often start with a minimal PATH, so the usual uv locations are tried last.
+PATH="$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin"
+command -v uv >/dev/null 2>&1 || { echo "brAIn: uv not found (run ./doctor.sh)" >&2; exit 0; }
+
+mkdir -p "$root/.rag"
+(cd "$root" && uv run rag sync >"$root/.rag/sync.log" 2>&1 &)

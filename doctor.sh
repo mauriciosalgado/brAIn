@@ -23,9 +23,9 @@ model_works() {
   uv run --no-sync python -c "import sys; from rag.index import embeddings; sys.exit(not embeddings.model_works())"
 }
 
-# The branch the index follows (main, or BRAIN_BRANCH) must exist and have commits.
+# The remote-tracking branch must have been fetched.
 index_branch() {
-  uv run --no-sync python -c "from rag import config, git; git.branch_tip(config.BRANCH)"
+  uv run --no-sync python -c "from rag import config, git; git.remote_branch_tip(config.REMOTE, config.BRANCH)"
 }
 
 # Hooks only run when git is pointed at .githooks and the scripts are executable.
@@ -41,7 +41,7 @@ check "brain.toml is valid" "run: uv run rag status, and fix what it says" uv ru
 check "MCP server loads" "run ./setup.sh" uv run --no-sync python -c "import rag.mcp.server"
 check "embedding model works offline" "run ./setup.sh; needs internet once" model_works
 check "git hooks enabled" "run ./setup.sh" hooks_enabled
-check "index branch found" "create 'main', or set branch in brain.toml to the branch your notes are on" index_branch
+check "index branch found" "check remote and branch in brain.toml, then fetch the remote" index_branch
 check "index up to date" "run ./setup.sh; details: uv run rag status" uv run --no-sync rag status
 
 if [ "$ok" = false ]; then

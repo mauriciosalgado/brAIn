@@ -3,16 +3,19 @@
 # This file is committed, so everyone who uses this repository (you, or your whole team) gets the
 # same settings. Change a value and commit it. Delete a line to get its default (shown below).
 # A mistake, like a typo or a number out of range, stops brAIn with a message that says what to fix.
-# When a change needs the notes to be indexed again, brAIn does it by itself.
+# After changing settings, restart your AI assistant.
+# Run `uv run rag sync` to apply changes that affect indexing; search never rebuilds the index.
 
 
 # ---- What is searched -------------------------------------------------------------------------
 
-# The branch that notes are merged into. Only this branch is searched, whichever branch you have
-# checked out. Working alone? Commit straight to this branch. Working in a team? Notes become
-# searchable after their pull request is merged here.
+# The remote branch to index. Sync uses its last fetched/pushed commit, whichever local branch
+# you have checked out. Search reads the last synced snapshot. Unpushed commits are never indexed.
 # Use "master" or "trunk" if that is what your branch is called.
 branch = "main"
+
+# The Git remote that holds the published notes. Fetch/pull after other people push changes.
+remote = "origin"
 
 # Folders inside notes/ that are not searched, such as old or unfinished notes.
 # Example: ["archive", "drafts"] skips notes/archive/ and notes/drafts/.
@@ -36,7 +39,7 @@ score_margin = 0.10
 
 # ---- How notes are cut into passages ----------------------------------------------------------
 # Each note is cut along its headings. These two numbers are in characters. The defaults suit most
-# notes. Changing them re-indexes your notes.
+# notes. Changing them rebuilds the index on the next sync.
 
 # A section longer than this is split into more passages (500 to 8000).
 max_chunk_size = 1000

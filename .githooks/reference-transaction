@@ -1,15 +1,26 @@
 #!/bin/sh
 [ "$1" = committed ] || exit 0
 
-changed=false
-while read -r _old _new ref; do
-  case "$ref" in
-    refs/heads/*) changed=true ;;
-  esac
-done
-[ "$changed" = true ] || exit 0
-
 # Git clients often start with a minimal PATH, so the usual uv locations are tried last.
 PATH="$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin"
 
-uv run rag sync
+target_ref=
+should_sync=false
+# Consume the full transaction before starting synchronization.
+while read -r old new ref; do
+  case "$ref" in
+    refs/remotes/*) ;;
+    *) continue ;;
+  esac
+  [ "$old" != "$new" ] || continue
+  if [ -z "$target_ref" ]; then
+    target_ref=$(uv run --no-sync python -c 'from rag.config import INDEX_REF; print(INDEX_REF)' </dev/null) || exit 1
+  fi
+  if [ "$ref" = "$target_ref" ]; then
+    should_sync=true
+  fi
+done
+[ "$should_sync" = true ] || exit 0
+
+printf '\n'
+exec uv run --no-sync rag sync

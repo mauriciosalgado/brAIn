@@ -2,10 +2,10 @@
 
 import subprocess
 from collections.abc import Iterator
-from pathlib import PurePosixPath
 from typing import IO
 
 from rag import config
+from rag.notes import is_note
 
 _NOTES_DIR = config.NOTES_DIR.relative_to(config.ROOT).as_posix()
 
@@ -14,7 +14,7 @@ class GitError(RuntimeError):
     pass
 
 
-def _run(*args: str) -> str:
+def _run(*args: str, input_text: str | None = None) -> str:
     try:
         result = subprocess.run(
             ["git", "-C", str(config.ROOT), *args],
@@ -23,6 +23,7 @@ def _run(*args: str) -> str:
             encoding="utf-8",
             errors="replace",
             check=True,
+            input=input_text,
         )
     except FileNotFoundError as error:
         raise GitError("git is not installed") from error
@@ -35,23 +36,16 @@ def _split(output: str) -> list[str]:
     return output.split("\0")[:-1]  # -z output ends with a separator
 
 
-def branch_tip(branch: str) -> str:
-    """The latest commit of `branch`."""
+def remote_branch_tip(remote: str, branch: str) -> str:
+    """The last fetched or pushed commit of a remote branch."""
     try:
-        return _run("show-ref", "--verify", "--hash", f"refs/heads/{branch}").strip()
+        return _run("show-ref", "--verify", "--hash", f"refs/remotes/{remote}/{branch}").strip()
     except GitError as error:
         raise GitError(
-            f"No '{branch}' branch with commits in {config.ROOT} ({error}). "
-            "Set branch in brain.toml (or BRAIN_BRANCH) to the branch your notes are on."
+            f"No '{remote}/{branch}' remote-tracking branch in {config.ROOT} ({error}). "
+            "Check remote and branch in brain.toml (or BRAIN_BRANCH), then fetch the remote. "
+            "Local commits are not indexed until pushed."
         ) from error
-
-
-def _is_note(path: str) -> bool:
-    """A Markdown file outside hidden folders and the configured exclusions."""
-    relative = PurePosixPath(path).relative_to(_NOTES_DIR)
-    hidden = any(part.startswith(".") for part in relative.parts)
-    skipped = any(relative.is_relative_to(folder) for folder in config.SKIP_FOLDERS)
-    return path.endswith(".md") and not hidden and not skipped
 
 
 def changed_notes(since: str, until: str) -> tuple[list[str], list[str]]:
@@ -60,7 +54,7 @@ def changed_notes(since: str, until: str) -> tuple[list[str], list[str]]:
     fields = _split(output)  # status, path, status, path, ...
     changed, removed = [], []
     for status, path in zip(fields[::2], fields[1::2], strict=True):
-        if _is_note(path):
+        if is_note(path):
             (removed if status == "D" else changed).append(path)
     return changed, removed
 
@@ -68,7 +62,7 @@ def changed_notes(since: str, until: str) -> tuple[list[str], list[str]]:
 def list_notes(commit: str) -> list[str]:
     """Eligible note paths in a commit."""
     paths = _split(_run("ls-tree", "-r", "-z", "--name-only", commit, "--", _NOTES_DIR))
-    return [path for path in paths if _is_note(path)]
+    return [path for path in paths if is_note(path)]
 
 
 def plan_index(
@@ -78,12 +72,38 @@ def plan_index(
     if since == head:
         return [], []
     if since:
-        try:
+        kind = _run("cat-file", "--batch-check=%(objecttype)", input_text=f"{since}\n").strip()
+        if kind == "commit":
             return changed_notes(since, head)
-        except GitError:  # the previous commit may be gone after a history rewrite
-            pass
+        if kind != f"{since} missing":
+            raise GitError(f"{since} is not a commit")
     current = sorted(list_notes(head))
     return current, sorted(indexed_paths - set(current))
+
+
+def _blob_size(fields: list[bytes], commit: str, path: str) -> int:
+    if len(fields) != 3 or fields[1] != b"blob" or not fields[2].isdigit():
+        raise GitError(f"{path} is not in commit {commit[:7]}")
+    return int(fields[2])
+
+
+def file_sizes(commit: str, paths: list[str]) -> dict[str, int]:
+    """Read committed blob sizes in one batch, without requesting their contents."""
+    if not paths:
+        return {}
+    output = _run(
+        "cat-file",
+        "--batch-check",
+        "-Z",
+        input_text="".join(f"{commit}:{path}\0" for path in paths),
+    )
+    headers = _split(output)
+    if len(headers) != len(paths):
+        raise GitError("git cat-file returned an incomplete size listing")
+    return {
+        path: _blob_size(header.encode().split(), commit, path)
+        for path, header in zip(paths, headers, strict=True)
+    }
 
 
 def _read_header(stream: IO[bytes]) -> list[bytes]:
@@ -105,10 +125,7 @@ def read_files(commit: str, paths: list[str]) -> Iterator[tuple[str, bytes]]:
         for path in paths:  # NUL framing keeps filenames separate from the blob contents.
             process.stdin.write(f"{commit}:{path}\0".encode())
             process.stdin.flush()
-            header = _read_header(process.stdout)
-            if len(header) != 3 or header[1] != b"blob" or not header[2].isdigit():
-                raise GitError(f"{path} is not in commit {commit[:7]}")
-            size = int(header[2])
+            size = _blob_size(_read_header(process.stdout), commit, path)
             content = process.stdout.read(size)
             if len(content) != size or process.stdout.read(1) != b"\0":
                 raise GitError(f"Incomplete committed file: {path}")

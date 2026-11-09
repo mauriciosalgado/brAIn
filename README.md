@@ -35,9 +35,14 @@ Developed and tested on macOS. Linux should work the same; on Windows, use WSL (
 
 The sync hook is required. Setup sets this repository's `core.hooksPath` to `.githooks`,
 replacing any custom hooks path with a warning. Doctor checks that the hook is enabled and
-executable. Git's `reference-transaction` hook runs synchronization
-after local branch updates, including commits, pulls, merges, rebases, resets and direct ref
-updates. It does not fetch or pull. Only the configured branch is indexed.
+executable. Git's `reference-transaction` hook synchronizes only after the configured
+remote-tracking branch changes: a successful push, fetch, or the fetch step of a pull.
+The target comes from `remote` and `branch` in `brain.toml` (`origin/main` by default);
+`BRAIN_BRANCH` overrides the branch. The hook does not fetch or pull itself.
+Local commits, merges and rebases do not index unpublished changes.
+
+The hook uses the installed environment without updating dependencies; run `./setup.sh` after
+dependency changes.
 
 ## Use it
 
@@ -69,9 +74,12 @@ It gets four tools:
 | Tool | What it does |
 |------|--------------|
 | `search_notes` | Returns the passages of the notes that best match a question, each with its note path and section |
-| `read_note` | Returns a whole note, by the path a search gave. Reads the searched branch, never the working copy |
+| `read_note` | Reads the current whole Markdown file, by the path a search gave. May include unpublished edits. |
 | `get_note_standards` | Returns the rules for writing a note, and the full path of the notes folder |
 | `get_note_template` | Returns a ready-to-fill template (`note`, `runbook`) |
+
+Search reads the existing index without checking Git or synchronizing. Whole-note reads use the
+current file, which may be newer than the indexed passage. Only sync updates the index.
 
 ### 2. Search from the terminal
 
@@ -94,40 +102,42 @@ what the title is and which tags it has.
   role."* It reads the standard and a template through brAIn, then creates the note in `notes/`
   with the right name and tags.
 
-Then commit the note. See the next section for when it becomes searchable.
+Then commit and push the note. See the next section for when it becomes searchable.
 
 **Never put secrets in a note** (passwords, keys, tokens). Search results are shown to your AI
 assistant, and a shared repository is shared.
 
 ## Alone or in a team
 
-Only one branch is searched: `main`, or the one you set in `brain.toml`. This is what keeps
-everyone's search the same, and what keeps unfinished notes out of it.
+Only the last known remote version of one branch is searched: `origin/main`, or the remote and
+branch you set in `brain.toml`. Local commits are not searchable until published there.
 
 | | Working alone | Working in a team |
 |---|---------------|-------------------|
 | **You write** | Commit the note on `main` | Commit it on a branch and open a pull request |
-| **It becomes searchable** | After committing (automatic sync) | When the pull request is merged and you `git pull` |
+| **It becomes searchable** | After pushing to the configured remote branch (automatic sync) | When the pull request is merged remotely and you fetch or pull |
 | **Other machines or people** | Pull on the other machine | Everyone's next `git pull` updates their search |
 
-- A note is found only once it is **committed** on that branch. Edits you have not committed are
-  never indexed.
-- After local branch updates, only changed notes are re-indexed before Git returns.
-  Git displays the sync command's normal counts, warnings and errors directly.
-  If sync fails, the branch update is not undone; the next search brings the index up to date.
+- A note is found only once it is **published** on the configured remote branch and its commit
+  is known locally. Uncommitted edits and unpushed commits are never indexed.
+- After the configured remote-tracking branch updates, only changed notes are re-indexed before
+  Git returns. Several unpushed commits are indexed as one net change when pushed.
+  Sync summaries are labeled `RAG:`; the hook adds a blank line before its output.
+  Warnings and errors are displayed directly.
+  If sync fails, the branch update is not undone; run `uv run rag sync` again. Search does not
+  repair the index automatically.
 - Notes you delete or rename disappear from search (a rename is a delete plus an add).
 - The first setup indexes everything once: roughly two minutes for a 1,000-note vault. After that,
   only what changed is indexed.
 
-To check the index against the current branch:
+To check the index against the last known remote commit:
 
 ```bash
 uv run rag status
 ```
 
-Status exits successfully only when the indexed commit matches the searched branch's current
-local commit, even if no notes changed. A change only on GitHub is not local yet: update your
-local branch first.
+Status exits successfully only when the indexed commit matches the remote-tracking branch,
+even if no notes changed. Changes on GitHub become known here after you fetch or pull.
 
 ## Configure
 
@@ -136,12 +146,14 @@ local branch first.
 [`brain.toml`](brain.toml) holds the settings you may want to change. Every setting is explained
 in the file itself. It is committed, so everyone who uses the repository gets the same settings,
 and it is read when a process starts. Delete a line to get its default. After changing settings,
-restart your AI assistant. The next sync or index preparation rebuilds the cache only when the
-indexed content needs to change.
+restart your AI assistant. For changes that affect indexing, run `uv run rag sync`; search does
+not apply them automatically. Sync rebuilds the cache only when the indexed content needs to
+change. Search reports an unusable cache instead of rebuilding it.
 
 | Setting | Default | What it does |
 |---------|---------|--------------|
 | `branch` | `"main"` | The branch whose notes are searched. Use `"master"` or `"trunk"` if that is yours. |
+| `remote` | `"origin"` | The Git remote that holds the published branch. Fetch it before the first sync. |
 | `skip_folders` | `[]` | Folders inside `notes/` that are not searched, such as `["archive", "drafts"]`. |
 | `skip_headings` | `["References", "Table of Contents", "TOC"]` | Sections under these headings are not searched. |
 | `max_results` | `10` | Most passages one search returns (1 to 50). |
@@ -182,7 +194,8 @@ them from there.
 |---------|---------|
 | Anything at all | `./doctor.sh` |
 | Is my search up to date? | `uv run rag status` |
-| A note does not show up | It must be committed on the searched branch (merged, if you use pull requests), and you must have pulled |
+| A note does not show up | Publish it on the configured remote branch, then fetch or pull on other machines; run `uv run rag sync` if needed |
+| Search asks me to sync | Run `uv run rag sync`; search never creates or repairs an index |
 | A note is reported as skipped | `rag sync` reports empty notes, notes over 2 MB, invalid UTF-8 and inputs over the model's token limit |
 | Search returns nothing or is broken | Rebuild the local index: `rm -rf .rag/lancedb && uv run rag sync` |
 | The search model is missing or damaged | `uv run rag model` |
@@ -216,25 +229,30 @@ version.
 | `STANDARDS.md` | How notes are named, filed and tagged |
 | `brain.toml` | Settings |
 | `rag/git.py` | Local branch state, raw committed-file reads, and paths to index or remove |
+| `rag/notes.py` | Shared note-path rules and whole-note reading |
 | `rag/index/` | Markdown chunking, embeddings, database operations, synchronization, and search |
 | `rag/mcp/server.py` | Four tools exposing search, whole-note reads, standards, and templates |
 | `rag/config.py`, `rag/cli.py` | Settings and terminal commands |
-| `setup.sh`, `doctor.sh`, `.githooks/` | Install, check, and the hook that updates search after local branch changes |
+| `setup.sh`, `doctor.sh`, `.githooks/` | Install, check, and the hook that updates search after remote-tracking branch changes |
 | `AGENTS.md`, `.github/copilot-instructions.md` | Instructions for AI assistants working in this repository |
 | `PLAN.md` | What is done and what is next, with the decisions and measurements |
 
 `.rag/` is your own local index. It can always be rebuilt from the notes and is never committed.
 
-CLI and MCP requests explicitly call `indexer.prepare_index` before retrieval. It updates only
-when needed and holds the index lock until retrieval finishes. Opening an existing database or
-checking status never rebuilds it; synchronization handles incompatible caches explicitly.
+CLI and MCP search requests use `store.open_index` to open an existing, complete index and hold
+the index lock until retrieval finishes. Missing, incomplete or incompatible caches produce an
+error asking for `rag sync`; retrieval never checks Git, creates a table or rebuilds a cache.
 `search.py` only searches the supplied database; it does not read Git or synchronize anything.
-Synchronization and preparation share the same freshness check; a current index does not scan or
-embed notes again. When paths are needed, the store streams only the source column through
+Synchronization compares the index with the configured remote branch and changes indexed
+notes. It checks committed blob sizes in one batch before requesting contents; oversized notes
+are reported without loading their contents. A current index does not scan or embed notes again.
+When paths are needed, the store streams only the source column through
 LanceDB's query API, without a preliminary chunk count or loading vectors.
 Vector searches likewise fetch only passage fields and cosine distance, not the stored vectors.
 The CLI lives in one file. Its command handlers import engine dependencies only when executed,
 so help does not initialize the database or ML libraries.
+The MCP `read_note` tool delegates to `notes.read_note`. That function owns the reading backend;
+changing it to Git-backed reads later does not require changing MCP routing or search.
 
 ## For developers
 

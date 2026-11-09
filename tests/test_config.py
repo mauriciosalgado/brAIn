@@ -24,9 +24,13 @@ def test_without_a_file_or_with_an_empty_one_every_default_applies(tmp_path):
 
 
 def test_settings_can_be_changed_one_at_a_time(tmp_path):
-    result = load(tmp_path, 'branch = "master"\nskip_folders = ["archive"]\nmax_results = 5\n')
+    result = load(
+        tmp_path,
+        'branch = "master"\nremote = "upstream"\nskip_folders = ["archive"]\nmax_results = 5\n',
+    )
     assert (result.branch, result.skip_folders, result.max_results) == ("master", ["archive"], 5)
     assert result.max_chunk_size == config.Settings().max_chunk_size
+    assert result.remote == "upstream"
 
 
 @pytest.mark.parametrize(
@@ -35,6 +39,8 @@ def test_settings_can_be_changed_one_at_a_time(tmp_path):
         ('brnach = "main"', "brnach"),
         ('branch = ""', "branch"),
         ("branch = 3", "branch"),
+        ('remote = ""', "remote"),
+        ("remote = 3", "remote"),
         ('skip_folders = "archive"', "skip_folders"),
         ("max_results = 0", "max_results"),
         ("max_results = 2.5", "max_results"),

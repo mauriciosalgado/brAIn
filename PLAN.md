@@ -14,8 +14,8 @@ Rules: keep it simple · measure before adding · nothing is committed without t
 - [x] Local index: LanceDB in `.rag/`, exact scan below 50k chunks, IVF-HNSW above
 - [x] Index follows git: what git reports as A / M / D since the last indexed commit is indexed / re-indexed /
       removed (`rag/git.py` plans; `rag/index/indexer.py` applies); one marker (the commit) says if the index is fresh
-- [x] Git flow: `.githooks/` + `setup.sh` + `doctor.sh`; CLI/MCP prepare the index through
-      `indexer.prepare_index`, then pass the database to retrieval-only `search.query`
+- [x] Git flow: `.githooks/` + `setup.sh` + `doctor.sh`; sync updates the index, while CLI/MCP
+      use `store.open_index` and retrieval-only `search.query` without checking Git
 - [x] Notes with no content (empty, title only) or unreadable are reported, never silently skipped
 - [x] Tokenizer uses the model's 8,192-token context; over-limit input is reported before inference,
       and the context limit is part of the index fingerprint
@@ -44,13 +44,12 @@ Then:
 - [ ] Exact-identifier boost (`aws-rds-copy`, error codes, flags): BM25 hybrid gave no gain on paraphrased
       questions, but identifier queries were not measured
 - [x] MCP `search_notes` returns plain text: one `<passage rank source section>` block per chunk, text unescaped
-- [x] MCP `read_note(path)`: a whole note from the searched branch, only paths git lists as notes
+- [x] MCP `read_note(path)`: current Markdown files through `notes.read_note`, with shared path rules
 - [ ] MCP `list_notes(folder)`
 - [x] `brain.toml`: the settings a user may change (branch, skipped folders and headings, result count, score
       margin, chunk sizes), commented in plain words, read at run time and validated; `BRAIN_BRANCH` is a
       personal override. The model and vector size stay in code on purpose.
-- [ ] MCP: the first search on a big unindexed vault must not block for minutes (a host times out): say
-      "index is building" and answer from what exists
+- [x] MCP search never builds an index: missing or unusable caches ask for explicit synchronization
 - [x] Agent authoring help: MCP tools `get_note_standards` and `get_note_template`
 - [ ] Peak memory of a query is 1.35 GB (multilingual vocabulary): check whether it can come down
 - [ ] Measure German retrieval (the model is multilingual, but untested on German notes)
@@ -69,29 +68,28 @@ Then:
 - Store: LanceDB (embedded). Rejected: SQLite+NumPy (no vector index, slow at scale), Chroma (not
   process-safe), FAISS (library only), Qdrant (embedded mode is dev-only; server needs a container).
 - Types are tags for humans; search never depends on them.
-- Works for one person or a team: alone, commit on the searched branch and the next search sees it; in a
-  team, notes are searchable once merged there. Docs and tools say "your notes", not "the team's".
+- Works for one person or a team: publish on the configured remote branch, then sync its last known
+  commit. Docs and tools say "your notes", not "the team's".
 - Instructions have one home each: the MCP tool descriptions (how to use the tools), `STANDARDS.md` (the
   rules, served by `get_note_standards`), `AGENTS.md` (working in the repo), and
   `.github/copilot-instructions.md`, which only points to `AGENTS.md`. Written after GitHub's custom
   instructions docs, agents.md and Anthropic's "Writing tools for agents".
 - A batch of notes is replaced in one atomic `merge_insert`: a search sees the old chunks or the new
   ones, never a note with none, and each batch makes one version instead of two.
-- The index follows the configured local branch (`main` by default), whichever branch is checked
-  out. Commits on that branch are searchable without pushing. A rename is a delete + add.
-  Hooks are required and normally update the index; explicit preparation also handles missed or
-  in-progress updates before CLI/MCP retrieval.
-  It holds the existing index lock through preparation and retrieval so a concurrent update cannot
-  mix table snapshots and commit markers. Search itself only uses the database supplied by its caller.
-- Notes are read from the synced commit (`git cat-file`), never the working tree: a dirty tree or a
-  pull in progress cannot leak WIP. A note that fails (empty, too big, not UTF-8) fails the same way
-  every time, so it is retried when a commit changes it.
+- The index follows the configured remote-tracking branch (`origin/main` by default), whichever
+  branch is checked out. Unpushed commits are never indexed. A rename is a delete + add.
+  Hooks normally sync after push/fetch/pull; a missed or failed sync requires `rag sync`.
+  Search opens the existing index and holds its lock through retrieval. It never checks Git,
+  synchronizes, or rebuilds missing/incompatible caches.
+- Sync reads published notes from the commit (`git cat-file`). Whole-note reads use current files
+  through `notes.read_note`, so they may show newer edits than search. The read implementation is
+  isolated from MCP and search so its source can change later without changing callers.
 - One marker file in `.rag/` holds the settings fingerprint and the last indexed commit. Different
   settings (model, chunk size, the chunker's code) or a lost table rebuild the index during sync,
   not during inspection. The marker is cleared before changing notes, so interrupted batches
   cannot claim to match a commit.
-- After pulling code changes, restart the MCP server (restart your AI tool): a process that kept old
-  code and a fresh `rag sync` would each rebuild the index in turn (wasteful, never wrong).
+- After pulling code changes, restart the MCP server (restart your AI tool): a process with an old
+  fingerprint can reject a freshly synced cache. Retrieval does not rebuild it automatically.
 - Queries return every chunk (not note) within `score_margin` (0.10) of the best, up to `max_results` (10); the best is always kept.
   Model choice, measured on a 353-chunk mock vault (70 notes, 85 questions, near-duplicate topics):
   arctic-embed-m-v2.0 has the best recall (hit@5 0.88, MRR 0.69) vs bge-small (0.71, 0.56) and

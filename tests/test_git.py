@@ -32,14 +32,25 @@ def test_every_file_is_read_in_order_whatever_its_content(vault, commit, vault_g
     for path, content in contents.items():
         (vault.parent / path).write_bytes(content)
     commit()
-    assert dict(git.read_files(tip(vault_git), list(contents))) == contents
+    head = tip(vault_git)
+    assert git.file_sizes(head, list(contents)) == {
+        path: len(content) for path, content in contents.items()
+    }
+    assert dict(git.read_files(head, list(contents))) == contents
 
 
-def test_a_path_that_is_not_in_the_commit_is_an_error(vault, commit, vault_git):
+@pytest.mark.parametrize("reader", [git.file_sizes, git.read_files])
+def test_a_path_that_is_not_in_the_commit_is_an_error(vault, commit, vault_git, reader):
     (vault / "a.md").write_text("a")
     commit()
     with pytest.raises(git.GitError, match="not in commit"):
-        list(git.read_files(tip(vault_git), ["notes/missing.md"]))
+        list(reader(tip(vault_git), ["notes/missing.md"]))
+
+
+def test_incomplete_size_listings_are_an_error(monkeypatch):
+    monkeypatch.setattr(git, "_run", lambda *_args, **_kwargs: "oid blob 5\0")
+    with pytest.raises(git.GitError, match="incomplete size listing"):
+        git.file_sizes("commit", ["notes/a.md", "notes/b.md"])
 
 
 def test_incomplete_committed_bytes_are_not_returned_as_a_note(monkeypatch):
@@ -71,21 +82,23 @@ def test_changed_notes_splits_what_to_update_from_what_to_remove(vault, commit, 
     assert sorted(removed) == ["notes/gone.md", "notes/keep.md"]
 
 
-def test_the_tip_is_that_of_the_named_branch_whatever_is_checked_out(vault, commit, vault_git):
+def test_the_tip_is_that_of_the_named_remote_branch_whatever_is_checked_out(
+    vault, publish, vault_git
+):
     (vault / "a.md").write_text("a")
-    main = commit()
+    main = publish()
     vault_git("checkout", "-q", "-b", "feature")
     (vault / "b.md").write_text("b")
-    commit()
-    assert git.branch_tip("main") == main
+    publish()
+    assert git.remote_branch_tip("origin", "main") == main
     with pytest.raises(git.GitError):
-        git.branch_tip("release")
+        git.remote_branch_tip("origin", "release")
 
 
-def test_a_branch_name_is_not_a_revision_expression(vault, commit):
-    commit()
-    with pytest.raises(git.GitError, match="No 'main~0' branch"):
-        git.branch_tip("main~0")
+def test_a_branch_name_is_not_a_revision_expression(vault, publish):
+    publish()
+    with pytest.raises(git.GitError, match="No 'origin/main~0' remote-tracking branch"):
+        git.remote_branch_tip("origin", "main~0")
 
 
 def test_only_markdown_notes_outside_hidden_and_skipped_folders_are_notes(
@@ -134,19 +147,41 @@ def test_missing_history_plans_all_current_notes_and_removes_obsolete_paths(
     assert not config.DB_DIR.exists()
 
 
+def test_unexpected_diff_errors_do_not_become_rebuild_plans(vault, commit, monkeypatch):
+    (vault / "a.md").write_text("before")
+    previous = commit()
+    (vault / "a.md").write_text("after")
+    head = commit()
+    monkeypatch.setattr(
+        git, "changed_notes", Mock(side_effect=git.GitError("unexpected diff failure"))
+    )
+    monkeypatch.setattr(git, "list_notes", lambda _: pytest.fail("unexpected rebuild"))
+    with pytest.raises(git.GitError, match="unexpected diff failure"):
+        git.plan_index(previous, head, {"notes/a.md"})
+
+
+def test_history_lookup_errors_do_not_become_rebuild_plans(monkeypatch):
+    monkeypatch.setattr(git, "_run", Mock(side_effect=git.GitError("history lookup failed")))
+    monkeypatch.setattr(git, "list_notes", lambda _: pytest.fail("unexpected rebuild"))
+    with pytest.raises(git.GitError, match="history lookup failed"):
+        git.plan_index("previous", "head", {"notes/a.md"})
+
+
 def test_the_tip_is_the_configured_branch_and_a_missing_one_says_how_to_fix_it(
-    vault, commit, vault_git, monkeypatch
+    vault, publish, vault_git, monkeypatch
 ):
     (vault / "a.md").write_text("a")
-    main = commit()
+    main = publish()
     vault_git("checkout", "-q", "-b", "feature")
-    assert git.branch_tip(config.BRANCH) == main
+    assert git.remote_branch_tip(config.REMOTE, config.BRANCH) == main
     monkeypatch.setattr(config, "BRANCH", "release")
-    with pytest.raises(git.GitError, match=r"No 'release' branch.*brain\.toml"):
-        git.branch_tip(config.BRANCH)
+    with pytest.raises(
+        git.GitError, match=r"No 'origin/release' remote-tracking branch.*brain\.toml"
+    ):
+        git.remote_branch_tip(config.REMOTE, config.BRANCH)
 
 
 def test_outside_a_repository_the_error_says_so(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "ROOT", tmp_path)
     with pytest.raises(git.GitError, match="not a git repository"):
-        git.branch_tip(config.BRANCH)
+        git.remote_branch_tip(config.REMOTE, config.BRANCH)

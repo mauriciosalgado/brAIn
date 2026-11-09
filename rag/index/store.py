@@ -31,6 +31,7 @@ SCHEMA = pa.schema(
     ]
 )
 VECTOR_INDEX = "vector_idx"
+_INDEX_UNAVAILABLE = "No usable search index. Run 'uv run rag sync' first."
 
 # Everything that decides what is stored. When it changes, the index is rebuilt from the notes.
 FINGERPRINT = hashlib.sha256(
@@ -50,10 +51,22 @@ FINGERPRINT = hashlib.sha256(
 
 
 @contextmanager
-def write_lock():
-    """Keep updates and prepared readers from mixing table snapshots with newer commit markers."""
+def index_lock():
+    """Keep index updates and readers from mixing table snapshots with commit markers."""
     with FileLock(config.LOCK_PATH):
         yield
+
+
+@contextmanager
+def open_index():
+    """Open a complete existing index for retrieval, without checking Git or synchronizing."""
+    if not config.DB_DIR.is_dir():
+        raise RuntimeError(_INDEX_UNAVAILABLE)
+    with index_lock():
+        store = Store(create=False)
+        if store.indexed_commit() is None:
+            raise RuntimeError(_INDEX_UNAVAILABLE)
+        yield store
 
 
 class EmbeddedNote(NamedTuple):
@@ -73,14 +86,18 @@ def _chunks_of(sources: list[str]) -> str:
 class Store:
     """LanceDB passage operations and the marker identifying the indexed commit."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, create: bool = True) -> None:
+        if not create and not config.DB_DIR.is_dir():
+            raise RuntimeError(_INDEX_UNAVAILABLE)
         self._db = lancedb.connect(config.DB_DIR)
         self._marker = config.DB_DIR / "indexed"
         if TABLE in self._db.list_tables().tables:
             self._table = self._db.open_table(TABLE)
-        else:
+        elif create:
             self._table = self._db.create_table(TABLE, schema=SCHEMA)
             self.set_indexed_commit(None)
+        else:
+            raise RuntimeError(_INDEX_UNAVAILABLE)
 
     def rebuild_if_needed(self) -> None:
         """Rebuild a cache made with different settings. Only synchronization calls this."""

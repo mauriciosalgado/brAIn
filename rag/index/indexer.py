@@ -1,14 +1,13 @@
-"""Synchronize committed notes and explicitly prepare a locked index for readers."""
+"""Synchronize published notes into the local index. Retrieval lives in store and search."""
 
 import logging
-from collections.abc import Generator, Iterable, Iterator
-from contextlib import contextmanager
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 
 from rag import config, git
 from rag.index import chunker, embeddings
 from rag.index.chunker import Chunk
-from rag.index.store import EmbeddedNote, Store, write_lock
+from rag.index.store import EmbeddedNote, Store, index_lock
 
 logger = logging.getLogger(__name__)
 
@@ -22,8 +21,6 @@ class SyncStats:
 
 
 def _chunk(source: str, content: bytes) -> list[Chunk]:
-    if len(content) > config.MAX_NOTE_BYTES:
-        raise ValueError(f"larger than {config.MAX_NOTE_BYTES} bytes")
     chunks = chunker.chunk_markdown(content.decode("utf-8-sig"), source)
     if not chunks:
         raise ValueError("no content to index")
@@ -33,7 +30,15 @@ def _chunk(source: str, content: bytes) -> list[Chunk]:
 def _embedded(head: str, paths: list[str], stats: SyncStats) -> Iterator[EmbeddedNote]:
     """The notes to write, chunked and embedded one at a time. A note that cannot be indexed is
     recorded in `stats.failed` instead."""
-    for source, content in git.read_files(head, paths):
+    readable = []
+    for source, size in git.file_sizes(head, paths).items():
+        if size > config.MAX_NOTE_BYTES:
+            message = f"larger than {config.MAX_NOTE_BYTES} bytes"
+            stats.failed[source] = message
+            logger.warning("skipped %s: %s", source, message)
+        else:
+            readable.append(source)
+    for source, content in git.read_files(head, readable):
         try:
             chunks = _chunk(source, content)
             vectors = embeddings.embed_documents([chunk.embedding_text for chunk in chunks])
@@ -60,48 +65,31 @@ def _batches(notes: Iterable[EmbeddedNote]) -> Iterator[list[EmbeddedNote]]:
         yield batch
 
 
-def _sync(store: Store, head: str) -> SyncStats:
-    """Apply the captured commit while the caller holds the index lock."""
-    since = store.indexed_commit()
-    if since == head:
-        return SyncStats()
-    store.rebuild_if_needed()
-    to_write, to_delete = git.plan_index(since, head, store.sources())
-    stats = SyncStats(removed=len(to_delete))
-    if to_write or to_delete:
-        store.set_indexed_commit(None)  # partial writes must never claim to match a commit
-    for batch in _batches(_embedded(head, to_write, stats)):
-        store.replace_notes(batch)
-    store.delete_notes(to_delete + list(stats.failed))  # nothing stale stays for a failed note
-    store.set_indexed_commit(head)
-    if to_write or to_delete:
-        store.maintain()
-    return stats
-
-
 def sync() -> SyncStats:
-    """Update the local index from the configured branch, independent of search."""
-    with write_lock():
-        head = git.branch_tip(config.BRANCH)
-        return _sync(Store(), head)
-
-
-@contextmanager
-def prepare_index() -> Generator[Store, None, None]:
-    """Synchronize if needed, then hold the lock through retrieval.
-
-    Hooks normally update the index. This also handles missed or in-progress hook updates.
-    """
-    with write_lock():
-        head = git.branch_tip(config.BRANCH)
+    """Update the local index from the configured remote branch, independent of search."""
+    with index_lock():
+        head = git.remote_branch_tip(config.REMOTE, config.BRANCH)
         store = Store()
-        _sync(store, head)
-        yield store
+        since = store.indexed_commit()
+        if since == head:
+            return SyncStats()
+        store.rebuild_if_needed()
+        to_write, to_delete = git.plan_index(since, head, store.sources())
+        stats = SyncStats(removed=len(to_delete))
+        if to_write or to_delete:
+            store.set_indexed_commit(None)  # partial writes must never claim to match a commit
+        for batch in _batches(_embedded(head, to_write, stats)):
+            store.replace_notes(batch)
+        store.delete_notes(to_delete + list(stats.failed))  # nothing stale stays for a failed note
+        store.set_indexed_commit(head)
+        if to_write or to_delete:
+            store.maintain()
+        return stats
 
 
 @dataclass
 class Status:
-    branch_tip: str  # the latest commit of the searched branch
+    branch_tip: str  # the last known commit of the searched remote branch
     indexed_commit: str | None  # the commit the index matches
     pending: int  # notes a sync would add, update or remove
     notes: int  # notes in the index
@@ -109,18 +97,18 @@ class Status:
 
 
 def status() -> Status:
-    """Compare the index with Git without embedding or synchronizing notes."""
+    """Compare the index with Git without creating it, embedding or synchronizing notes."""
     # Read counts and the commit marker from the same locked snapshot.
-    with write_lock():
-        store = Store()
-        head = git.branch_tip(config.BRANCH)
-        indexed = store.indexed_commit()
-        sources = store.sources()
+    with index_lock():
+        head = git.remote_branch_tip(config.REMOTE, config.BRANCH)
+        store = Store(create=False) if config.DB_DIR.is_dir() else None
+        indexed = store.indexed_commit() if store is not None else None
+        sources = store.sources() if store is not None else set()
         writes, deletes = git.plan_index(indexed, head, sources)
         return Status(
             head,
             indexed,
             len(writes) + len(deletes),
             len(sources),
-            store.count(),
+            store.count() if store is not None else 0,
         )

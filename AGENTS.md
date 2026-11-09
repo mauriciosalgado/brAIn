@@ -36,7 +36,7 @@ uv run ty check rag   # types
 
 | Path | What it is |
 |------|------------|
-| `rag/git.py` | Local branch state, note-change plans, and raw committed-file bytes. No database operations or whole-note tool. |
+| `rag/git.py` | Local branch state, note-change plans, and committed-file size and text. No database operations or whole-note tool. |
 | `rag/index/` | `chunker.py` (Markdown to passages), `embeddings.py` (text to vectors), `store.py` (LanceDB operations and locked retrieval), `indexer.py` (synchronization), `search.py` (retrieves passages from a supplied database) |
 | `rag/notes.py` | Shared note eligibility and whole-note reading |
 | `rag/` | `config.py` (settings), `cli.py` (terminal commands), `mcp/server.py` (the tools for agents) |

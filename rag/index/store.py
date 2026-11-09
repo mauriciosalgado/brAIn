@@ -59,15 +59,11 @@ def index_lock(timeout: float = -1) -> BaseFileLock:
 def read_lock() -> Generator[None]:
     """The index lock for a reader. A sync can hold it for minutes, so a reader says so instead
     of hanging."""
-    lock = index_lock(config.READ_LOCK_TIMEOUT)
     try:
-        lock.acquire()
+        with index_lock(config.READ_LOCK_TIMEOUT):
+            yield
     except Timeout as error:
         raise RuntimeError(_SYNC_RUNNING) from error
-    try:
-        yield
-    finally:
-        lock.release()
 
 
 @contextmanager

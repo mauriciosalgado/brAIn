@@ -7,8 +7,8 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "✗ missing: $1 ($2)"; exit 
 need git "https://git-scm.com/"
 need uv "https://docs.astral.sh/uv/getting-started/installation/"
 
-if ! git cat-file --batch -Z </dev/null >/dev/null 2>&1; then
-  echo "✗ Git 2.42+ and a Git clone are required (https://git-scm.com/)"
+if ! git rev-parse --git-dir >/dev/null 2>&1; then
+  echo "✗ brAIn must be run from a Git clone (https://git-scm.com/)"
   exit 1
 fi
 

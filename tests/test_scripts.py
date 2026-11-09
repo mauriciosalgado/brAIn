@@ -46,14 +46,6 @@ def fake_uv(directory: Path, log: Path, behaviour: str = "") -> str:
     return f"{directory}:{SYSTEM_PATH}"
 
 
-def fake_old_git(directory: Path) -> None:
-    executable = directory / "git"
-    executable.write_text(
-        '#!/bin/sh\nif [ "$1" = cat-file ]; then exit 129; fi\nexec /usr/bin/git "$@"\n'
-    )
-    executable.chmod(0o755)
-
-
 def run(script: Path, *args: str, path: str = SYSTEM_PATH, home: Path | None = None):
     return subprocess.run(
         [str(script), *args],
@@ -122,15 +114,6 @@ def test_setup_without_uv_explains_how_to_get_it(clone):
     assert result.returncode == 1 and "✗ missing: uv" in result.stdout
 
 
-def test_setup_stops_before_installing_when_git_lacks_required_batch_support(clone, tmp_path):
-    log = tmp_path / "uv.log"
-    path = fake_uv(tmp_path / "bin", log)
-    fake_old_git(tmp_path / "bin")
-    result = run(clone / "setup.sh", path=path)
-    assert result.returncode == 1 and "Git 2.42+" in result.stdout
-    assert not log.exists()
-
-
 def test_setup_outside_a_git_clone_fails(tmp_path):
     lone = tmp_path / "lone"
     lone.mkdir()
@@ -156,16 +139,7 @@ def test_doctor_reports_everything_wrong_on_a_fresh_clone(clone):
         "✗ git hooks enabled",
     ):
         assert problem in result.stdout
-    assert "✓ git 2.42+ installed" in result.stdout and "Fix the issues above" in result.stdout
-
-
-def test_doctor_reports_unsupported_git_without_stopping_other_checks(clone, tmp_path):
-    healthy_clone(clone)
-    path = fake_uv(tmp_path / "bin", tmp_path / "uv.log")
-    fake_old_git(tmp_path / "bin")
-    result = run(clone / "doctor.sh", path=path)
-    assert result.returncode == 1 and "✗ git 2.42+ installed" in result.stdout
-    assert result.stdout.count("✗") == 1 and result.stdout.count("✓") == 8
+    assert "✓ git installed" in result.stdout and "Fix the issues above" in result.stdout
 
 
 @pytest.mark.parametrize("scope", ["local", "global"])

@@ -106,7 +106,7 @@ def _templates() -> dict[str, Path]:
 
 @mcp.tool(title="Get note standards", output_schema=None, annotations=READ_ONLY)
 def get_note_standards() -> str:
-    """Get the rules for writing a note: its folder, file name, title and tags.
+    """Get the rules for writing a note: its folder, file name, title, tags and writing guidelines.
 
     Call it before creating or editing a note, and follow it. It also gives the full path of the
     notes folder.

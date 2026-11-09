@@ -11,7 +11,7 @@ Rules: keep it simple · measure before adding · nothing is committed without t
 - [x] Chunker: one chunk per heading (`rag/index/chunker.py`); long sections are split at paragraph, line or word
       breaks. Checked on a 70-note team vault + 12 messy notes (`tests/fixtures/`): size limit, no text lost
 - [x] Embedder: arctic-embed-m-v2.0 int8 (multilingual, Apache-2.0, 320 MB, registered as a fastembed custom model), small batches, query prefix, model cached in `.rag/models`, repaired by `rag model`
-- [x] Local index: LanceDB in `.rag/`, exact scan (a vector index is unnecessary below ~100k chunks)
+- [x] Local index: LanceDB in `.rag/`, exact scan (0.4 s at 1M passages; a vector index is not needed below that)
 - [x] Index follows git: what git reports as A / M / D since the last indexed commit is indexed / re-indexed /
       removed (`rag/git.py` plans; `rag/index/indexer.py` applies); one marker (the commit) says if the index is fresh
 - [x] Git flow: `.githooks/` + `setup.sh` + `doctor.sh`; sync updates the index, while CLI/MCP
@@ -20,8 +20,13 @@ Rules: keep it simple · measure before adding · nothing is committed without t
 - [x] Tokenizer uses the model's 8,192-token context; over-limit input is reported before inference,
       and the context limit is part of the index fingerprint
 - [x] MCP tool `search_notes` (bounded `k`, clear errors) and CLI `rag sync | query | status | model`
-- [x] Historical scale measurements: 200,000 chunks (5 ms search; 1.8 GB on disk); 20,000 notes: a pull of 15 changed
-      notes syncs in 0.1 s; 273 tests. First index costs about 22 ms per chunk (100k chunks is about 35 min)
+- [x] Scale, measured on an Apple M4 Pro with the real model and synthetic vectors (script not kept):
+      embedding 28 ms/passage (100k passages = 47 min); 4.0 passages/note on 70 team-vault notes and
+      8.1 on the 9 notes here; disk 3.1 KB of vectors per passage plus the text. Exact scan: 50k
+      passages 23 ms, 100k 43 ms, 200k 82 ms, 500k 208 ms, 1M 386 to 457 ms (about 0.4 ms per 1,000
+      passages); 1M passages hold about 1 GB of memory while searching. An IVF_PQ index at 1M:
+      built in 14 s, search 13 ms, recall not measured. Earlier measurement: 20,000 notes, a pull of
+      15 changed notes syncs in 0.1 s
 
 ## Next (in order)
 
@@ -61,7 +66,10 @@ Then:
 - [ ] Remove real AWS account ID and company hostnames from the public repo
 - [ ] Tell users that search results go to the AI host's model, so notes must hold no secrets
 - [ ] Windows support (scripts are `sh`; untested)
-- [ ] Shared index for a very large team (LanceDB on object storage), only if needed
+- [ ] Shared index, if the first index (28 ms/passage, 4 to 8 passages/note: 30,000 notes = 1 to 2 h
+      per person) is too slow for a team: one central build that people only read. Search itself
+      is not the limit (1M passages = 0.4 s). LanceDB documents S3, GCS and Azure storage, but this
+      repository has not tried it, and the marker, lock, hook and query model would all change
 
 ## Decisions
 
@@ -86,9 +94,9 @@ Then:
   through `notes.read_note`, so they may show newer edits than search. The read implementation is
   isolated from MCP and search so its source can change later without changing callers.
 - One marker file in `.rag/` holds the settings fingerprint and the last indexed commit. Different
-  settings (model, chunk size, the chunker's code) or a lost table rebuild the index during sync,
-  not during inspection. The marker is cleared before changing notes, so interrupted batches
-  cannot claim to match a commit.
+  settings (model, chunk size) or code (the chunker, the embedder), or a lost table, rebuild the
+  index during sync, not during inspection. The marker is cleared before changing notes, so
+  interrupted batches cannot claim to match a commit.
 - After pulling code changes, restart the MCP server (restart your AI tool): a process with an old
   fingerprint can reject a freshly synced cache. Retrieval does not rebuild it automatically.
 - Queries return every chunk (not note) within `score_margin` (0.10) of the best, up to `max_results` (10); the best is always kept.

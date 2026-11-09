@@ -7,15 +7,14 @@ with instructions for agents.
 ## Using the knowledge base
 
 Use the brAIn MCP tools: `search_notes`, `read_note`, `get_note_standards` and
-`get_note_template`. Their descriptions say when to use each. Without MCP, run `uv run rag query "question"` to search, and
-read `STANDARDS.md` and `templates/` before writing a note.
+`get_note_template`. Their descriptions say when to use each. Without MCP, run
+`uv run rag query "question"` to search, and read `STANDARDS.md` and `templates/` before writing a
+note. `STANDARDS.md` also holds the guidelines for writing notes (look before writing, never invent
+facts, no secrets): it is where agents outside this repository read them, through
+`get_note_standards`.
 
-Rules for writing notes that the standard does not cover:
+Rules that only apply when working in this repository:
 
-- **Search first.** If a note on the topic exists, update it instead of adding a duplicate, and
-  link the related notes.
-- **Never invent facts.** If you are unsure, leave a clear `TODO` for a person.
-- **No secrets** in notes. Keep runbooks generic: no hardcoded paths, accounts or hosts.
 - **Create notes on a new branch**, not on the main branch, and leave committing and merging to the
   user unless they ask you to.
 - **Only the configured remote-tracking branch is indexed** (`origin/main` by default).
@@ -28,7 +27,7 @@ Run these from the repository root. The first run needs internet once, to downlo
 
 ```bash
 ./setup.sh            # install, download the model, index the notes (once)
-uv run pytest         # all tests, about a minute; they use the real model
+uv run pytest         # all tests, about 6 minutes; they use the real model
 uvx ruff check .      # lint; also run: uvx ruff format --check rag tests
 uv run ty check rag   # types
 ./doctor.sh           # check the installation

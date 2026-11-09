@@ -63,7 +63,8 @@ remote branch, never from the working tree:
    model ([arctic-embed-m-v2.0](https://huggingface.co/Snowflake/snowflake-arctic-embed-m-v2.0),
    multilingual, run by [fastembed](https://github.com/qdrant/fastembed)).
 4. `rag/index/store.py` writes them to a [LanceDB](https://lancedb.com) table in `.rag/`, together
-   with the indexed commit. Changed settings or chunker code rebuild the index on the next sync.
+   with the indexed commit. Changed settings, chunker code or embedding code rebuild the index on
+   the next sync.
 
 **Search** (CLI and MCP) only reads that index: it embeds the question, takes the closest passages
 by cosine similarity, and keeps those within `score_margin` of the best one
@@ -78,6 +79,7 @@ by `rag sync` and skipped. A rename counts as a delete plus an add.
 
 Copy a template from [`templates/`](templates/) and save it in the right folder of `notes/`, or ask
 your assistant: it reads the standard and a template through brAIn first. Then commit and push.
+The folder also opens as an [Obsidian](https://obsidian.md) vault: `.obsidian/` pins its plugins.
 
 **Never put secrets in a note.** Search results are shown to your AI assistant, and a shared
 repository is shared.
@@ -121,8 +123,26 @@ If something is wrong, start with `./doctor.sh`. To rebuild the index from scrat
 `rm -rf .rag/lancedb && uv run rag sync`. After `git pull` brings new code, restart your assistant.
 
 The search model needs about 1.4 GB of memory while running and 320 MB of disk; the first search
-in a session takes a couple of seconds while it loads. Everything stays on your computer except what
+in a session takes a few seconds while it loads. Everything stays on your computer except what
 your assistant sends to its own model: the passages it retrieved.
+
+## Scale
+
+Every person builds and searches a local index, which suits teams up to some tens of thousands of
+notes. A note makes 4 to 8 passages (measured on 70 team notes and on this repository's notes). The
+cost is the first index, not search. Measured on an Apple M4 Pro, CPU only:
+
+| Passages  | Notes              | First index (28 ms per passage) | Exact search |
+|----------:|-------------------:|--------------------------------:|-------------:|
+|   100,000 |   12,500 to 25,000 |                      47 minutes |  about 40 ms |
+|   200,000 |   25,000 to 50,000 |                       1.6 hours |  about 80 ms |
+| 1,000,000 | 125,000 to 250,000 |                       7.9 hours |  about 0.4 s |
+
+- Disk is about 3.5 KB per passage, and searching 1,000,000 passages uses about 1 GB of memory.
+- 30,000 notes take 1 to 2 hours to index for each person. Later syncs only handle changed notes.
+- If that first index is too slow for your team, build one shared index instead of one per person.
+  This is not supported yet (see `PLAN.md`).
+- Search timings use random vectors, so search quality at that size is not measured.
 
 ## Project structure
 
@@ -141,7 +161,7 @@ your assistant sends to its own model: the passages it retrieved.
 `.rag/` is your local index. It can always be rebuilt and is never committed.
 
 ```bash
-uv run pytest                                   # tests (about a minute, real model)
+uv run pytest                                   # tests (about 6 minutes, real model)
 uvx ruff check . && uvx ruff format --check rag tests
 uv run ty check rag
 ```

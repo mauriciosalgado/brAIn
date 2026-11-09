@@ -1,6 +1,7 @@
 """The guarantees rag/index/store.py gives to the sync code."""
 
 import pytest
+from lancedb.query import LanceVectorQueryBuilder
 
 from rag import config
 from rag.index import store
@@ -18,6 +19,16 @@ def test_the_index_survives_being_opened_again(vault):
     Store().set_indexed_commit("abc123")
     again = Store()
     assert again.sources() == {"notes/a.md"} and again.indexed_commit() == "abc123"
+
+
+@pytest.mark.parametrize("notes", [0, 25])
+def test_sources_reads_every_unique_path_without_counting_chunks(vault, monkeypatch, notes):
+    index = Store()
+    expected = {f"notes/n{i}.md" for i in range(notes)}
+    if expected:
+        index.replace_notes([note(source, chunks=3) for source in sorted(expected)])
+    monkeypatch.setattr(index, "count", lambda: pytest.fail("source scans must not count chunks"))
+    assert index.sources() == expected
 
 
 def test_a_lost_table_forgets_which_commit_it_matched(vault):
@@ -74,3 +85,44 @@ def test_deleting_nothing_changes_nothing(vault):
     index.replace_notes([note("notes/a.md")])
     index.delete_notes([])
     assert index.sources() == {"notes/a.md"}
+
+
+@pytest.mark.parametrize("indexed", [False, True])
+def test_search_preserves_results_without_materializing_vectors(vault, monkeypatch, indexed):
+    index = Store()
+    notes = [note(f"notes/n{i}.md") for i in range(24)]
+    for i, item in enumerate(notes):
+        item.vectors[0][i] = float(i + 1)
+    index.replace_notes(notes)
+    if indexed:
+        monkeypatch.setattr(config, "INDEX_AFTER_ROWS", 4)
+        index.maintain()
+    vector = [1.0] + [0.0] * (config.EMBEDDING_SIZE - 1)
+    expected = (
+        index._table.search(vector)
+        .metric("cosine")
+        .limit(5)
+        .nprobes(config.SEARCH_NPROBES)
+        .refine_factor(config.SEARCH_REFINE_FACTOR)
+        .to_list()
+    )
+    materialized = []
+    original = LanceVectorQueryBuilder.to_list
+
+    def capture(query):
+        rows = original(query)
+        materialized.extend(rows)
+        return rows
+
+    monkeypatch.setattr(LanceVectorQueryBuilder, "to_list", capture)
+    assert index.search(vector, 5) == [
+        {
+            "text": row["text"],
+            "source": row["source"],
+            "header_path": row["header_path"],
+            "score": 1 - row["_distance"],
+        }
+        for row in expected
+    ]
+    assert materialized
+    assert all(set(row) == {"text", "source", "header_path", "_distance"} for row in materialized)

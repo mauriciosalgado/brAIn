@@ -321,12 +321,17 @@ def test_preparation_uses_the_configured_branch_not_the_checked_out_one(vault, c
         assert "forty" in search.query("how long do I bake the cake", index)[0]["text"]
 
 
-def test_preparing_a_current_index_does_not_write_it_again(vault, commit):
+def test_preparing_a_current_index_does_not_read_notes_or_write_it_again(
+    vault, commit, monkeypatch
+):
     (vault / "aws-keys.md").write_text(AWS)
     commit()
     with indexer.prepare_index() as index:
         version = index._table.version
         marker_inode = (config.DB_DIR / "indexed").stat().st_ino
+    monkeypatch.setattr(git, "read_files", lambda *_: pytest.fail("read notes"))
+    monkeypatch.setattr(Store, "sources", lambda _: pytest.fail("scan sources"))
+    monkeypatch.setattr(Store, "rebuild_if_needed", lambda _: pytest.fail("rebuild"))
     with indexer.prepare_index() as index:
         assert index._table.version == version
         assert (config.DB_DIR / "indexed").stat().st_ino == marker_inode

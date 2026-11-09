@@ -216,6 +216,10 @@ CLI and MCP requests explicitly call `indexer.prepare_index` before retrieval. I
 when needed and holds the index lock until retrieval finishes. Opening an existing database or
 checking status never rebuilds it; synchronization handles incompatible caches explicitly.
 `search.py` only searches the supplied database; it does not read Git or synchronize anything.
+Synchronization and preparation share the same freshness check; a current index does not scan or
+embed notes again. When paths are needed, the store streams only the source column through
+LanceDB's query API, without a preliminary chunk count or loading vectors.
+Vector searches likewise fetch only passage fields and cosine distance, not the stored vectors.
 The CLI lives in one file. Its command handlers import engine dependencies only when executed,
 so help does not initialize the database or ML libraries.
 

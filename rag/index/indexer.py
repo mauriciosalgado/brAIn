@@ -62,10 +62,11 @@ def _batches(notes: Iterable[EmbeddedNote]) -> Iterator[list[EmbeddedNote]]:
 
 def _sync(store: Store, head: str) -> SyncStats:
     """Apply the captured commit while the caller holds the index lock."""
-    store.rebuild_if_needed()
-    if store.indexed_commit() == head:
+    since = store.indexed_commit()
+    if since == head:
         return SyncStats()
-    to_write, to_delete = git.plan_index(store.indexed_commit(), head, store.sources())
+    store.rebuild_if_needed()
+    to_write, to_delete = git.plan_index(since, head, store.sources())
     stats = SyncStats(removed=len(to_delete))
     if to_write or to_delete:
         store.set_indexed_commit(None)  # partial writes must never claim to match a commit
@@ -94,8 +95,7 @@ def prepare_index() -> Generator[Store, None, None]:
     with write_lock():
         head = git.branch_tip(config.BRANCH)
         store = Store()
-        if store.indexed_commit() != head:
-            _sync(store, head)
+        _sync(store, head)
         yield store
 
 
@@ -114,11 +114,12 @@ def status() -> Status:
     with write_lock():
         store = Store()
         head = git.branch_tip(config.BRANCH)
+        indexed = store.indexed_commit()
         sources = store.sources()
-        writes, deletes = git.plan_index(store.indexed_commit(), head, sources)
+        writes, deletes = git.plan_index(indexed, head, sources)
         return Status(
             head,
-            store.indexed_commit(),
+            indexed,
             len(writes) + len(deletes),
             len(sources),
             store.count(),

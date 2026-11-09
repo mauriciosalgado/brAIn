@@ -24,10 +24,10 @@ def test_the_best_match_is_kept_however_weak():
     assert search.best_matches([hit("a", -0.3)]) == [hit("a", -0.3)]
 
 
-def test_the_best_match_comes_first_with_its_section_and_score(vault, commit):
+def test_the_best_match_comes_first_with_its_section_and_score(vault, publish):
     (vault / "aws-keys.md").write_text(AWS)
     (vault / "cake.md").write_text(CAKE)
-    commit()
+    publish()
     indexer.sync()
     hits = search.query("how often should we rotate credentials", Store())
     assert [h["source"] for h in hits] == ["notes/aws-keys.md"]
@@ -36,35 +36,35 @@ def test_the_best_match_comes_first_with_its_section_and_score(vault, commit):
 
 
 def test_search_reads_the_supplied_database_without_checking_or_updating_git(
-    vault, commit, monkeypatch
+    vault, publish, monkeypatch
 ):
     (vault / "cake.md").write_text(CAKE)
-    indexed = commit()
+    indexed = publish()
     indexer.sync()
     store = Store()
     (vault / "cake.md").write_text(CAKE.replace("forty", "fifty"))
-    commit()
+    publish()
 
     def unexpected(*_):
         pytest.fail("Retrieval must not check Git or synchronize the index")
 
-    monkeypatch.setattr(git, "branch_tip", unexpected)
+    monkeypatch.setattr(git, "remote_branch_tip", unexpected)
     monkeypatch.setattr(indexer, "sync", unexpected)
     hits = search.query("how long do I bake the cake", store)
     assert "forty" in hits[0]["text"] and "fifty" not in hits[0]["text"]
     assert store.indexed_commit() == indexed
 
 
-def test_a_query_returns_at_most_max_results(vault, commit):
+def test_a_query_returns_at_most_max_results(vault, publish):
     for i in range(6):
         (vault / f"aws-{i}.md").write_text(numbered(i))
-    commit()
+    publish()
     indexer.sync()
     assert len(search.query("how often to rotate keys", Store(), max_results=3)) == 3
 
 
-def test_a_query_without_notes_does_not_load_the_model(vault, commit, monkeypatch):
-    commit()
+def test_a_query_without_notes_does_not_load_the_model(vault, publish, monkeypatch):
+    publish()
     indexer.sync()
     monkeypatch.setattr(embeddings, "embed_query", lambda _: pytest.fail("loaded model"))
     with pytest.raises(ValueError, match="No notes"):

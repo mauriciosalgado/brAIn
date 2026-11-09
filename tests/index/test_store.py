@@ -1,4 +1,4 @@
-"""The guarantees rag/index/store.py gives to the sync code."""
+"""Storage and locked-retrieval guarantees."""
 
 import pytest
 from lancedb.query import LanceVectorQueryBuilder
@@ -6,7 +6,7 @@ from lancedb.query import LanceVectorQueryBuilder
 from rag import config
 from rag.index import store
 from rag.index.chunker import Chunk
-from rag.index.store import EmbeddedNote, Store
+from rag.index.store import EmbeddedNote, Store, open_index
 
 
 def note(source: str, vector_value: float = 0.1, chunks: int = 1) -> EmbeddedNote:
@@ -19,6 +19,34 @@ def test_the_index_survives_being_opened_again(vault):
     Store().set_indexed_commit("abc123")
     again = Store()
     assert again.sources() == {"notes/a.md"} and again.indexed_commit() == "abc123"
+
+
+def test_retrieval_does_not_create_a_missing_index(vault):
+    with pytest.raises(RuntimeError, match="uv run rag sync"), open_index():
+        pass
+    assert not config.DB_DIR.exists()
+
+
+@pytest.mark.parametrize("unusable", ["incomplete", "incompatible", "missing-table"])
+def test_retrieval_refuses_unusable_indexes_without_rebuilding(vault, monkeypatch, unusable):
+    index = Store()
+    index.replace_notes([note("notes/a.md")])
+    if unusable != "incomplete":
+        index.set_indexed_commit("abc123")
+    marker = (config.DB_DIR / "indexed").read_bytes()
+    version = index._table.version
+    if unusable == "incompatible":
+        monkeypatch.setattr(store, "FINGERPRINT", "other settings")
+    elif unusable == "missing-table":
+        index._db.drop_table(store.TABLE)
+    with pytest.raises(RuntimeError, match="uv run rag sync"), open_index():
+        pass
+    assert (config.DB_DIR / "indexed").read_bytes() == marker
+    if unusable == "missing-table":
+        assert store.TABLE not in index._db.list_tables().tables
+    else:
+        assert index._table.version == version
+        assert index.count() == 1
 
 
 @pytest.mark.parametrize("notes", [0, 25])

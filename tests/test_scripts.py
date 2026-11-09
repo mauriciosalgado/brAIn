@@ -15,7 +15,7 @@ from rag.index.store import TABLE
 
 PROJECT = Path(__file__).resolve().parents[1]
 SYSTEM_PATH = "/usr/bin:/bin"
-REF_UPDATE = f"{'0' * 40} {'1' * 40} refs/heads/main\n"
+REF_UPDATE = f"{'0' * 40} {'1' * 40} refs/remotes/origin/main\n"
 
 
 @pytest.fixture
@@ -34,7 +34,14 @@ def fake_uv(directory: Path, log: Path, behaviour: str = "") -> str:
     """A `uv` that records its calls and then runs `behaviour` (shell). Returns a PATH using it."""
     directory.mkdir(parents=True, exist_ok=True)
     uv = directory / "uv"
-    uv.write_text(f'#!/bin/sh\necho "$PWD: $*" >> "{log}"\n{behaviour}\n')
+    uv.write_text(
+        f'#!/bin/sh\necho "$PWD: $*" >> "{log}"\n'
+        'case "$*" in\n'
+        '  "run --no-sync python -c from rag.config import INDEX_REF; print(INDEX_REF)")\n'
+        "    echo refs/remotes/origin/main; exit 0 ;;\n"
+        "esac\n"
+        f"{behaviour}\n"
+    )
     uv.chmod(0o755)
     return f"{directory}:{SYSTEM_PATH}"
 
@@ -210,10 +217,12 @@ def test_doctor_flags_hooks_that_git_would_not_run(clone, tmp_path, broken):
 # ---- the hooks themselves -------------------------------------------------------------------
 
 
-@pytest.fixture
-def real_index_env(clone):
-    """A private application and index, using the installed environment and cached model."""
+@pytest.fixture(params=[("origin", "main"), ("upstream", "trunk"), ("origin", "release/notes")])
+def real_index_env(clone, request):
+    """Private application, remote, and index using the installed environment and cached model."""
+    remote, branch = request.param
     shutil.copytree(PROJECT / "rag", clone / "rag", ignore=shutil.ignore_patterns("__pycache__"))
+    (clone / "brain.toml").write_text(f'remote = "{remote}"\nbranch = "{branch}"\n')
     (clone / ".gitignore").write_text(".rag/\n__pycache__/\n")
     (clone / ".rag").mkdir()
     (clone / ".rag" / "models").symlink_to(config.MODEL_CACHE_DIR, target_is_directory=True)
@@ -222,7 +231,8 @@ def real_index_env(clone):
         "PATH": f"{Path(sys.executable).parent}:{os.environ['PATH']}",
         "VIRTUAL_ENV": sys.prefix,
         "PYTHONPATH": str(clone),
-        "BRAIN_BRANCH": "main",
+        "BRAIN_BRANCH": branch,
+        "TEST_REMOTE": remote,
         "UV_NO_PROJECT": "true",
         "UV_NO_SYNC": "true",
         "GIT_CONFIG_GLOBAL": "/dev/null",
@@ -230,6 +240,7 @@ def real_index_env(clone):
         "GIT_MERGE_AUTOEDIT": "no",
     }
     git(clone, "config", "core.hooksPath", "/dev/null")
+    git(clone, "symbolic-ref", "HEAD", f"refs/heads/{branch}")
     git(clone, "config", "user.name", "Test")
     git(clone, "config", "user.email", "test@example.com")
     git(clone, "config", "commit.gpgsign", "false")
@@ -240,7 +251,11 @@ def real_index_env(clone):
     (notes / "removed.md").write_text(numbered(2))
     git(clone, "add", ".")
     git(clone, "commit", "-q", "-m", "baseline")
-    baseline = git(clone, "rev-parse", "main")
+    baseline = git(clone, "rev-parse", branch)
+    published = clone.parent / "published.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(published)], env=env, check=True)
+    git(clone, "remote", "add", remote, str(published))
+    subprocess.run(["git", "push", "-q", "-u", remote, branch], cwd=clone, env=env, check=True)
     status = subprocess.run(
         ["uv", "run", "rag", "status"],
         cwd=clone,
@@ -250,7 +265,7 @@ def real_index_env(clone):
         check=False,
     )
     assert status.returncode == 1, status.stdout + status.stderr
-    assert f"index at nothing, main at {baseline[:7]}" in status.stdout
+    assert f"index at nothing, {remote}/{branch} at {baseline[:7]}" in status.stdout
     subprocess.run(
         ["uv", "run", "rag", "sync"],
         cwd=clone,
@@ -280,7 +295,8 @@ def real_index_env(clone):
 )
 def test_git_updates_trigger_sync_without_a_client(clone, real_index_env, update):
     env = real_index_env
-    baseline = git(clone, "rev-parse", "main")
+    remote, branch = env["TEST_REMOTE"], env["BRAIN_BRANCH"]
+    baseline = git(clone, "rev-parse", branch)
     notes = clone / "notes"
     marker = clone / ".rag" / "lancedb" / "indexed"
     if update != "commit":
@@ -291,7 +307,7 @@ def test_git_updates_trigger_sync_without_a_client(clone, real_index_env, update
     git(clone, "add", "-A")
     if update != "commit":
         git(clone, "commit", "-q", "-m", "note changes")
-        git(clone, "checkout", "-q", "main")
+        git(clone, "checkout", "-q", branch)
     if update in ("rebase", "pull-merge", "pull-rebase"):
         (clone / "local.txt").write_text("local change\n")
         git(clone, "add", "local.txt")
@@ -299,17 +315,29 @@ def test_git_updates_trigger_sync_without_a_client(clone, real_index_env, update
     if update in ("update-ref", "fetch"):
         git(clone, "checkout", "-q", "incoming")
     assert marker.read_text().partition("\n")[2] == baseline
+    if update in ("fetch", "pull-ff", "pull-merge", "pull-rebase"):
+        peer = clone.parent / "peer"
+        subprocess.run(
+            ["git", "clone", "-q", "--no-checkout", str(clone), str(peer)], env=env, check=True
+        )
+        git(peer, "remote", "set-url", "origin", str(clone.parent / "published.git"))
+        subprocess.run(
+            ["git", "push", "-q", "origin", f"{git(clone, 'rev-parse', 'incoming')}:{branch}"],
+            cwd=peer,
+            env=env,
+            check=True,
+        )
     git(clone, "config", "core.hooksPath", ".githooks")
     args = {
         "commit": ["commit", "-q", "-m", "new note"],
         "merge": ["merge", "incoming"],
         "rebase": ["rebase", "incoming"],
         "reset": ["reset", "--soft", "incoming"],
-        "update-ref": ["update-ref", "refs/heads/main", "incoming"],
-        "fetch": ["fetch", ".", "incoming:main"],
-        "pull-ff": ["pull", "--ff-only", ".", "incoming"],
-        "pull-merge": ["pull", "--no-rebase", "--no-ff", ".", "incoming"],
-        "pull-rebase": ["pull", "--rebase", ".", "incoming"],
+        "update-ref": ["update-ref", f"refs/heads/{branch}", "incoming"],
+        "fetch": ["fetch", remote],
+        "pull-ff": ["pull", "--ff-only", remote, branch],
+        "pull-merge": ["pull", "--no-rebase", "--no-ff", remote, branch],
+        "pull-rebase": ["pull", "--rebase", remote, branch],
     }[update]
     result = subprocess.run(
         ["git", *args],
@@ -320,9 +348,21 @@ def test_git_updates_trigger_sync_without_a_client(clone, real_index_env, update
         check=True,
     )
     output = result.stdout + result.stderr
-    assert output.count(" indexed (") == 1
-    assert "2 indexed (" in output and "1 removed" in output
-    head = git(clone, "rev-parse", "main")
+    if update not in ("fetch", "pull-ff", "pull-merge", "pull-rebase"):
+        assert " indexed (" not in output
+        assert marker.read_text().partition("\n")[2] == baseline
+        result = subprocess.run(
+            ["git", "push", remote, branch],
+            cwd=clone,
+            env=env,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        output = result.stdout + result.stderr
+    assert output.count("RAG: ") == 1
+    assert "\nRAG: 2 indexed (" in output and "1 removed" in output
+    head = git(clone, "rev-parse", f"refs/remotes/{remote}/{branch}")
     assert head != baseline
     assert marker.read_text().partition("\n")[2] == head
     status = subprocess.run(
@@ -333,7 +373,7 @@ def test_git_updates_trigger_sync_without_a_client(clone, real_index_env, update
         text=True,
         check=True,
     )
-    assert f"index at {head[:7]}, main at {head[:7]}" in status.stdout
+    assert f"index at {head[:7]}, {remote}/{branch} at {head[:7]}" in status.stdout
     table = lancedb.connect(clone / ".rag" / "lancedb").open_table(TABLE)
     rows = table.search().select(["source", "text"]).limit(None).to_list()
     assert {row["source"] for row in rows} == {
@@ -343,6 +383,39 @@ def test_git_updates_trigger_sync_without_a_client(clone, real_index_env, update
     }
     changed = "\n".join(row["text"] for row in rows if row["source"] == "notes/change.md")
     assert "fifty" in changed and "forty" not in changed
+
+
+@pytest.mark.parametrize("outcome", ["dry-run", "rejected"])
+def test_unsuccessful_publication_does_not_sync(clone, real_index_env, outcome):
+    env = real_index_env
+    remote, branch = env["TEST_REMOTE"], env["BRAIN_BRANCH"]
+    marker = clone / ".rag" / "lancedb" / "indexed"
+    before = marker.read_bytes()
+    git(clone, "config", "core.hooksPath", ".githooks")
+    (clone / "notes" / "draft.md").write_text(CAKE)
+    git(clone, "add", "-A")
+    git(clone, "commit", "-qm", "unpublished draft")
+    args = ["git", "push", remote, branch]
+    if outcome == "dry-run":
+        args.append("--dry-run")
+    else:
+        reject = clone.parent / "published.git" / "hooks" / "pre-receive"
+        reject.write_text("#!/bin/sh\nexit 1\n")
+        reject.chmod(0o755)
+    result = subprocess.run(args, cwd=clone, env=env, capture_output=True, text=True, check=False)
+    assert result.returncode == (0 if outcome == "dry-run" else 1)
+    assert " indexed (" not in result.stdout + result.stderr
+    assert marker.read_bytes() == before
+    result = subprocess.run(
+        ["uv", "run", "rag", "query", "how long to bake cake"],
+        cwd=clone,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "notes/draft.md" not in result.stdout
+    assert marker.read_bytes() == before
 
 
 def run_hook(
@@ -366,15 +439,19 @@ def run_hook(
 @pytest.mark.parametrize("updates", [REF_UPDATE, REF_UPDATE * 2])
 def test_reference_hook_runs_sync_once_from_the_repository_root(clone, tmp_path, updates):
     log = tmp_path / "uv.log"
-    output = "1 indexed (1 chunks), 0 removed"
+    output = "RAG: 1 indexed (1 chunks), 0 removed"
     path = fake_uv(tmp_path / "bin", log, f'echo "{output}"')
     result = run_hook(clone, path, tmp_path, "committed", input=updates)
     assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == output
-    assert log.read_text().strip() == f"{clone.resolve()}: run rag sync"
+    assert result.stdout == f"\n{output}\n"
+    assert log.read_text().splitlines() == [
+        f"{clone.resolve()}: run --no-sync python -c "
+        "from rag.config import INDEX_REF; print(INDEX_REF)",
+        f"{clone.resolve()}: run --no-sync rag sync",
+    ]
 
 
-@pytest.mark.parametrize("state", ["prepared", "aborted"])
+@pytest.mark.parametrize("state", ["preparing", "prepared", "aborted"])
 def test_uncommitted_reference_transactions_do_not_sync(clone, tmp_path, state):
     log = tmp_path / "uv.log"
     path = fake_uv(tmp_path / "bin", log)
@@ -382,7 +459,7 @@ def test_uncommitted_reference_transactions_do_not_sync(clone, tmp_path, state):
     assert result.returncode == 0 and not log.exists()
 
 
-@pytest.mark.parametrize("ref", ["HEAD", "refs/remotes/origin/main", "refs/tags/v1"])
+@pytest.mark.parametrize("ref", ["HEAD", "refs/heads/main", "refs/tags/v1"])
 def test_nonbranch_reference_updates_do_not_sync(clone, tmp_path, ref):
     log = tmp_path / "uv.log"
     path = fake_uv(tmp_path / "bin", log)
@@ -391,7 +468,7 @@ def test_nonbranch_reference_updates_do_not_sync(clone, tmp_path, ref):
         path,
         tmp_path,
         "committed",
-        input=REF_UPDATE.replace("refs/heads/main", ref),
+        input=REF_UPDATE.replace("refs/remotes/origin/main", ref),
     )
     assert result.returncode == 0 and not log.exists()
 
@@ -401,10 +478,10 @@ def test_hook_finds_uv_in_the_users_local_bin_when_git_has_a_minimal_path(clone,
     log = tmp_path / "uv.log"
     fake_uv(home / ".local" / "bin", log)
     assert run_hook(clone, SYSTEM_PATH, home, "committed", input=REF_UPDATE).returncode == 0
-    assert "run rag sync" in log.read_text()
+    assert "run --no-sync rag sync" in log.read_text()
 
 
-def test_sync_failure_is_reported_without_aborting_the_commit(clone, tmp_path):
+def test_sync_failure_is_reported_without_aborting_the_push(clone, tmp_path):
     healthy_clone(clone)
     path = fake_uv(tmp_path / "bin", tmp_path / "uv.log", 'echo "rag: disk full" >&2; exit 1')
     git(clone, "add", ".")
@@ -427,5 +504,19 @@ def test_sync_failure_is_reported_without_aborting_the_commit(clone, tmp_path):
         text=True,
         check=True,
     )
-    assert git(clone, "log", "-1", "--format=%s", "main") == "initial"
+    assert "rag: disk full" not in result.stderr
+    published = tmp_path / "remote.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(published)], check=True)
+    git(clone, "remote", "add", "origin", str(published))
+    result = subprocess.run(
+        ["git", "push", "origin", "main"],
+        cwd=clone,
+        env={"PATH": path, "HOME": str(clone)},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert git(clone, "--git-dir", str(published), "rev-parse", "refs/heads/main") == git(
+        clone, "rev-parse", "main"
+    )
     assert "rag: disk full" in result.stderr

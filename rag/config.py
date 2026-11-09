@@ -21,6 +21,7 @@ class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
     branch: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] = "main"
+    remote: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1)] = "origin"
     skip_folders: list[str] = []
     skip_headings: list[str] = ["References", "Table of Contents", "TOC"]
     max_results: int = Field(10, ge=1, le=50)
@@ -54,8 +55,10 @@ def load_settings(path: Path) -> Settings:
 
 _SETTINGS = load_settings(ROOT / "brain.toml")
 
-# The index holds this branch, whichever branch is checked out. BRAIN_BRANCH overrides brain.toml.
+# Synchronization follows the remote-tracking branch, never unpushed local commits.
 BRANCH: str = os.environ.get("BRAIN_BRANCH") or _SETTINGS.branch
+REMOTE: str = _SETTINGS.remote
+INDEX_REF: str = f"refs/remotes/{REMOTE}/{BRANCH}"
 NOTES_DIR: Path = ROOT / "notes"
 SKIP_FOLDERS: list[str] = _SETTINGS.skip_folders  # inside notes/
 SKIP_HEADINGS: list[str] = _SETTINGS.skip_headings

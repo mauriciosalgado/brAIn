@@ -15,7 +15,7 @@ fi
 echo "→ Installing dependencies"
 uv sync
 
-echo "→ Enabling git hooks (notes are synced whenever local branches change)"
+echo "→ Enabling git hooks (notes are synced when the remote-tracking branch changes)"
 chmod +x .githooks/*
 hooks=$(git config --get core.hooksPath || true)
 if [ -n "$hooks" ] && [ "$hooks" != .githooks ]; then

@@ -17,30 +17,37 @@ def run_cli(monkeypatch, capsys, *args):
 
 
 @pytest.mark.parametrize("question", [("how", "to", "rotate", "keys"), ("how to rotate keys",)])
-def test_sync_status_and_query(vault, commit, monkeypatch, capsys, question):
+def test_sync_status_and_query(vault, publish, monkeypatch, capsys, question):
     (vault / "aws-keys.md").write_text(AWS)
-    commit()
+    publish()
     code, out, _ = run_cli(monkeypatch, capsys, "status")
     assert code == 1 and "1 to update" in out and "index at nothing" in out
     code, out, _ = run_cli(monkeypatch, capsys, "sync")
-    assert code == 0 and "1 indexed" in out
+    assert code == 0 and out.startswith("RAG: 1 indexed (")
     code, out, _ = run_cli(monkeypatch, capsys, "status")
     assert code == 0 and "0 to update" in out
     code, out, _ = run_cli(monkeypatch, capsys, "query", *question)
     assert code == 0 and "notes/aws-keys.md" in out and "Score:" in out
     (vault / "aws-keys.md").write_text(AWS.replace("ninety", "sixty"))
-    commit()
+    publish()
+    code, out, _ = run_cli(monkeypatch, capsys, "query", *question)
+    assert code == 0 and "ninety" in out and "sixty" not in out
+    run_cli(monkeypatch, capsys, "sync")
     code, out, _ = run_cli(monkeypatch, capsys, "query", *question)
     assert code == 0 and "sixty" in out and "ninety" not in out
+    (vault / "aws-keys.md").unlink()
+    publish()
+    code, out, _ = run_cli(monkeypatch, capsys, "sync")
+    assert code == 0 and out == "RAG: 0 indexed (0 chunks), 1 removed\n"
 
 
-def test_problems_are_messages_not_tracebacks(vault, commit, monkeypatch, capsys, caplog):
+def test_problems_are_messages_not_tracebacks(vault, publish, monkeypatch, capsys, caplog):
     code, _, err = run_cli(monkeypatch, capsys, "query", "anything")
-    assert code == 1 and "No 'main' branch" in err and "Traceback" not in err
+    assert code == 1 and "Run 'uv run rag sync' first" in err and "Traceback" not in err
     code, _, err = run_cli(monkeypatch, capsys, "nonsense")
     assert code == 2 and "usage: rag" in err
     (vault / "bad.md").write_bytes(b"# Bad\n\nbroken \xff\xfe bytes " * 5)
-    commit()
+    publish()
     code, _, _ = run_cli(monkeypatch, capsys, "sync")
     assert code == 1 and "skipped notes/bad.md" in caplog.text
 
@@ -62,22 +69,22 @@ def test_io_failures_are_messages_not_tracebacks(monkeypatch, capsys):
 
 
 def test_status_requires_the_current_commit_even_when_no_notes_changed(
-    vault, commit, monkeypatch, capsys
+    vault, publish, monkeypatch, capsys
 ):
     (vault / "aws-keys.md").write_text(AWS)
-    indexed = commit()
+    indexed = publish()
     indexer.sync()
     (vault.parent / "README.md").write_text("Only documentation changed.\n")
-    head = commit()
+    head = publish()
     code, out, _ = run_cli(monkeypatch, capsys, "status")
     assert code == 1 and "0 to update" in out
-    assert f"index at {indexed[:7]}, main at {head[:7]}" in out
+    assert f"index at {indexed[:7]}, origin/main at {head[:7]}" in out
     monkeypatch.setattr(
         embeddings, "embed_documents", lambda _: pytest.fail("unchanged notes were embedded")
     )
     indexer.sync()
     code, out, _ = run_cli(monkeypatch, capsys, "status")
-    assert code == 0 and f"index at {head[:7]}, main at {head[:7]}" in out
+    assert code == 0 and f"index at {head[:7]}, origin/main at {head[:7]}" in out
 
 
 def test_help_does_not_load_settings_or_the_indexing_stack():

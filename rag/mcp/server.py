@@ -1,4 +1,4 @@
-"""Four MCP tools for search, committed-note reads, standards, and templates."""
+"""Four MCP tools for indexed search, current note files, standards, and templates."""
 
 from pathlib import Path
 from xml.sax.saxutils import quoteattr
@@ -6,8 +6,9 @@ from xml.sax.saxutils import quoteattr
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
-from rag import config, git
-from rag.index import indexer, search
+from rag import config, notes
+from rag.index import search
+from rag.index.store import open_index
 
 READ_ONLY = {"readOnlyHint": True, "openWorldHint": False}
 
@@ -40,7 +41,9 @@ def format_passages(hits: list[dict]) -> str:
 
 @mcp.tool(title="Search notes", output_schema=None, annotations=READ_ONLY)
 def search_notes(query: str, max_results: int = config.MAX_RESULTS) -> str:
-    """Search the notes by meaning and return the most relevant passages.
+    """Search the existing index by meaning and return the most relevant passages.
+
+    Does not synchronize or check Git. Results reflect the last completed sync.
 
     Use it whenever the answer may be in the user's notes: how something is done, why it was
     decided, how a system is set up, what happened in an incident. Prefer several short, specific
@@ -55,7 +58,7 @@ def search_notes(query: str, max_results: int = config.MAX_RESULTS) -> str:
         Passages, best match first, each with its note path (`source`) and `section`.
     """
     try:
-        with indexer.prepare_index() as store:
+        with open_index() as store:
             passages = search.query(
                 query, store, max_results=max(1, min(max_results, config.MAX_RESULTS))
             )
@@ -66,7 +69,9 @@ def search_notes(query: str, max_results: int = config.MAX_RESULTS) -> str:
 
 @mcp.tool(title="Read note", output_schema=None, annotations=READ_ONLY)
 def read_note(path: str) -> str:
-    """Read a whole note.
+    """Read the current whole note from the working tree, without Git or synchronization.
+
+    It may include unpublished edits newer than the passages returned by search.
 
     Use it when a passage from search_notes is cut off, or when you need the rest of the note.
 
@@ -74,14 +79,7 @@ def read_note(path: str) -> str:
         path: The note's path, as given by search_notes, for example "notes/handbook/keys.md".
     """
     try:
-        note_path = Path(path)
-        if note_path.is_relative_to(config.ROOT):
-            path = note_path.relative_to(config.ROOT).as_posix()
-        commit = git.branch_tip(config.BRANCH)
-        if path not in git.list_notes(commit):
-            raise ValueError(f"No note at {path} on {config.BRANCH}. Use a path from search_notes.")
-        ((_, content),) = git.read_files(commit, [path])
-        return content.decode("utf-8-sig", errors="replace")
+        return notes.read_note(path)
     except (OSError, ValueError, RuntimeError) as error:
         raise ToolError(str(error)) from error
 
@@ -107,8 +105,10 @@ def get_note_standards() -> str:
         f"Where notes live: {config.NOTES_DIR}\n"
         f"Create a new note at {config.NOTES_DIR}/<folder>/<file-name>.md, using this full path, "
         f"not the current directory.\n"
-        f"Notes are searchable once they are on the {config.BRANCH} branch. Unless the user says "
-        f"otherwise, create the note on a new branch, not on {config.BRANCH}, and leave "
+        f"Notes are searchable once published on {config.REMOTE}/{config.BRANCH} "
+        "and indexed by sync. "
+        f"Unless the user says otherwise, create the note on a new branch, not on {config.BRANCH}, "
+        f"and leave "
         f"committing and merging to them.\n"
         f"Templates: {', '.join(sorted(_templates())) or 'none'} (see get_note_template).\n\n"
         f"{standards}"

@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from rag import config
+from rag.index import indexer
 
 LIMIT_SECONDS = 60
 GIT_ENV = {
@@ -59,7 +60,7 @@ def git(repo: Path, *args: str) -> str:
 
 @pytest.fixture
 def commit(vault):
-    """Commits everything in the vault, as a teammate's push or your own commit would."""
+    """Commit everything in the vault without publishing it."""
 
     def run(message: str = "notes") -> str:
         git(vault.parent, "add", "-A")
@@ -73,3 +74,31 @@ def commit(vault):
 def vault_git(vault):
     """Runs a git command in the vault's repository."""
     return lambda *args: git(vault.parent, *args)
+
+
+@pytest.fixture
+def publish(commit, vault_git):
+    """Commit and simulate a successful push by updating the remote-tracking ref.
+
+    End-to-end script tests use a real remote and push instead.
+    """
+
+    def run(message: str = "notes") -> str:
+        head = commit(message)
+        branch = vault_git("symbolic-ref", "--short", "HEAD")
+        vault_git("update-ref", f"refs/remotes/{config.REMOTE}/{branch}", head)
+        return head
+
+    return run
+
+
+@pytest.fixture
+def sync(publish):
+    """Publish test notes and explicitly synchronize their index."""
+
+    def run(message: str = "notes") -> str:
+        head = publish(message)
+        indexer.sync()
+        return head
+
+    return run

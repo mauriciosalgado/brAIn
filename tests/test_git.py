@@ -1,7 +1,5 @@
 """Committed-note reads and local Git change plans, independent of the database."""
 
-from contextlib import nullcontext
-from io import BytesIO
 from unittest.mock import Mock
 
 import pytest
@@ -17,57 +15,59 @@ def test_files_are_read_as_committed_not_as_edited(vault, commit, vault_git):
     (vault / "a.md").write_text("committed")
     commit()
     (vault / "a.md").write_text("edited afterwards")
-    assert list(git.read_files(tip(vault_git), ["notes/a.md"])) == [("notes/a.md", b"committed")]
+    assert git.read_committed_file(tip(vault_git), "notes/a.md") == "committed"
 
 
-def test_every_file_is_read_in_order_whatever_its_content(vault, commit, vault_git):
-    tricky = b"abc blob 5\nxyz\n\n\r\n\x00\xff"  # looks like git's own protocol
+def test_every_file_is_read_whatever_its_name_and_content(vault, commit, vault_git):
     contents = {
-        "notes/big.md": b"x" * 300_000,
-        "notes/tricky.md": tricky,
-        "notes/empty.md": b"",
-        "notes/my note ü.md": b"unicode name",
-        "notes/line\nbreak.md": b"newline filename",
+        "notes/big.md": "x" * 300_000,
+        "notes/tricky.md": "abc blob 5\nxyz\n\n\x00 end",
+        "notes/empty.md": "",
+        "notes/my note ü.md": "unicode name ü",
+        "notes/line\nbreak.md": "newline filename",
     }
     for path, content in contents.items():
-        (vault.parent / path).write_bytes(content)
+        (vault.parent / path).write_text(content, encoding="utf-8")
     commit()
     head = tip(vault_git)
-    assert git.file_sizes(head, list(contents)) == {
-        path: len(content) for path, content in contents.items()
-    }
-    assert dict(git.read_files(head, list(contents))) == contents
+    for path, content in contents.items():
+        assert git.committed_file_size(head, path) == len(content.encode())
+        assert git.read_committed_file(head, path) == content
 
 
-@pytest.mark.parametrize("reader", [git.file_sizes, git.read_files])
+def test_a_byte_order_mark_is_removed_and_line_endings_are_normalized(vault, commit, vault_git):
+    (vault / "bom.md").write_bytes(b"\xef\xbb\xbftext")
+    (vault / "crlf.md").write_bytes(b"one\r\ntwo\rthree")
+    commit()
+    head = tip(vault_git)
+    assert git.read_committed_file(head, "notes/bom.md") == "text"
+    assert git.read_committed_file(head, "notes/crlf.md") == "one\ntwo\nthree"
+    assert git.committed_file_size(head, "notes/crlf.md") == len(b"one\r\ntwo\rthree")
+
+
+def test_invalid_utf8_is_an_error(vault, commit, vault_git):
+    (vault / "bad.md").write_bytes(b"not UTF-8: \xff")
+    commit()
+    with pytest.raises(ValueError, match="utf-8"):
+        git.read_committed_file(tip(vault_git), "notes/bad.md")
+
+
+@pytest.mark.parametrize("reader", [git.committed_file_size, git.read_committed_file])
 def test_a_path_that_is_not_in_the_commit_is_an_error(vault, commit, vault_git, reader):
     (vault / "a.md").write_text("a")
     commit()
-    with pytest.raises(git.GitError, match="not in commit"):
-        list(reader(tip(vault_git), ["notes/missing.md"]))
+    with pytest.raises(git.GitError, match=r"notes/missing\.md"):
+        reader(tip(vault_git), "notes/missing.md")
 
 
-def test_incomplete_size_listings_are_an_error(monkeypatch):
-    monkeypatch.setattr(git, "_run", lambda *_args, **_kwargs: "oid blob 5\0")
-    with pytest.raises(git.GitError, match="incomplete size listing"):
-        git.file_sizes("commit", ["notes/a.md", "notes/b.md"])
-
-
-def test_incomplete_committed_bytes_are_not_returned_as_a_note(monkeypatch):
-    process = Mock(stdin=BytesIO(), stdout=BytesIO(b"oid blob 5\0abc"), returncode=0)
-    monkeypatch.setattr(git.subprocess, "Popen", lambda *_args, **_kwargs: nullcontext(process))
-    with pytest.raises(git.GitError, match="Incomplete committed file"):
-        list(git.read_files("commit", ["notes/a.md"]))
-
-
-def test_list_notes_stays_inside_the_folder(vault, commit, vault_git):
+def test_list_committed_notes_stays_inside_the_folder(vault, commit, vault_git):
     (vault / "a.md").write_text("a")
     (vault.parent / "README.md").write_text("readme")
     commit()
-    assert git.list_notes(tip(vault_git)) == ["notes/a.md"]
+    assert git.list_committed_notes(tip(vault_git)) == ["notes/a.md"]
 
 
-def test_changed_notes_splits_what_to_update_from_what_to_remove(vault, commit, vault_git):
+def test_notes_changed_between_splits_what_to_update_from_what_to_remove(vault, commit, vault_git):
     (vault / "keep.md").write_text("keep")
     (vault / "edit.md").write_text("one")
     (vault / "gone.md").write_text("gone")
@@ -77,7 +77,7 @@ def test_changed_notes_splits_what_to_update_from_what_to_remove(vault, commit, 
     vault_git("rm", "-q", "notes/gone.md")
     vault_git("mv", "notes/keep.md", "notes/kept.md")  # a rename: a removal plus an addition
     second = commit()
-    changed, removed = git.changed_notes(first, second)
+    changed, removed = git.notes_changed_between(first, second)
     assert sorted(changed) == ["notes/edit.md", "notes/kept.md", "notes/new.md"]
     assert sorted(removed) == ["notes/gone.md", "notes/keep.md"]
 
@@ -117,10 +117,10 @@ def test_only_markdown_notes_outside_hidden_and_skipped_folders_are_notes(
         (vault / path).parent.mkdir(parents=True, exist_ok=True)
         (vault / path).write_text("text")
     head = commit()
-    assert git.list_notes(head) == ["notes/archive2/other.md", "notes/keep.md"]
+    assert git.list_committed_notes(head) == ["notes/archive2/other.md", "notes/keep.md"]
 
 
-def test_changed_notes_leave_out_what_is_not_a_note(vault, commit, vault_git):
+def test_notes_changed_between_leaves_out_what_is_not_a_note(vault, commit, vault_git):
     (vault / "a.md").write_text("a")
     first = commit()
     (vault / "a.md").write_text("changed")
@@ -129,9 +129,9 @@ def test_changed_notes_leave_out_what_is_not_a_note(vault, commit, vault_git):
     (vault / ".trash").mkdir()
     (vault / ".trash" / "c.md").write_text("hidden")
     second = commit()
-    assert sorted(git.changed_notes(first, second)[0]) == ["notes/a.md", "notes/b.md"]
+    assert sorted(git.notes_changed_between(first, second)[0]) == ["notes/a.md", "notes/b.md"]
     vault_git("rm", "-q", "notes/a.md")
-    assert git.changed_notes(second, commit())[1] == ["notes/a.md"]
+    assert git.notes_changed_between(second, commit())[1] == ["notes/a.md"]
 
 
 @pytest.mark.parametrize("previous", [None, "0" * 40])
@@ -153,16 +153,16 @@ def test_unexpected_diff_errors_do_not_become_rebuild_plans(vault, commit, monke
     (vault / "a.md").write_text("after")
     head = commit()
     monkeypatch.setattr(
-        git, "changed_notes", Mock(side_effect=git.GitError("unexpected diff failure"))
+        git, "notes_changed_between", Mock(side_effect=git.GitError("unexpected diff failure"))
     )
-    monkeypatch.setattr(git, "list_notes", lambda _: pytest.fail("unexpected rebuild"))
+    monkeypatch.setattr(git, "list_committed_notes", lambda _: pytest.fail("unexpected rebuild"))
     with pytest.raises(git.GitError, match="unexpected diff failure"):
         git.plan_index(previous, head, {"notes/a.md"})
 
 
 def test_history_lookup_errors_do_not_become_rebuild_plans(monkeypatch):
-    monkeypatch.setattr(git, "_run", Mock(side_effect=git.GitError("history lookup failed")))
-    monkeypatch.setattr(git, "list_notes", lambda _: pytest.fail("unexpected rebuild"))
+    monkeypatch.setattr(git, "_run_git", Mock(side_effect=git.GitError("history lookup failed")))
+    monkeypatch.setattr(git, "list_committed_notes", lambda _: pytest.fail("unexpected rebuild"))
     with pytest.raises(git.GitError, match="history lookup failed"):
         git.plan_index("previous", "head", {"notes/a.md"})
 

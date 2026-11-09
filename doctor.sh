@@ -34,7 +34,7 @@ hooks_enabled() {
   [ -x .githooks/reference-transaction ]
 }
 
-check "git 2.42+ installed" "https://git-scm.com/; run from a Git clone" git cat-file --batch -Z </dev/null
+check "git installed, in a Git clone" "https://git-scm.com/; run from a Git clone" git rev-parse --git-dir
 check "uv installed" "https://docs.astral.sh/uv/getting-started/installation/" command -v uv
 check "dependencies match uv.lock" "run ./setup.sh" uv sync --check
 check "brain.toml is valid" "run: uv run rag status, and fix what it says" uv run --no-sync python -c "import rag.config"

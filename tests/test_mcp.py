@@ -184,7 +184,7 @@ def test_a_path_from_a_search_can_be_read_in_full(vault, sync, name):
 def test_read_note_gives_current_text_without_git_or_sync(vault, monkeypatch):
     (vault / "a.md").write_bytes(b"\xef\xbb\xbfcurrent, unpublished text")
     monkeypatch.setattr(git, "remote_branch_tip", lambda *_: pytest.fail("Git check"))
-    monkeypatch.setattr(git, "read_files", lambda *_: pytest.fail("Git read"))
+    monkeypatch.setattr(git, "read_committed_file", lambda *_: pytest.fail("Git read"))
     monkeypatch.setattr(indexer, "sync", lambda: pytest.fail("sync"))
     assert call_tool("read_note", path="notes/a.md") == "current, unpublished text"
     assert call_tool("read_note", path=str(vault / "a.md")) == "current, unpublished text"

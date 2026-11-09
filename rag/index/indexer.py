@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 
 from rag import config, git
 from rag.index import chunker, embeddings
-from rag.index.chunker import Chunk
 from rag.index.store import EmbeddedNote, Store, index_lock, read_lock
 
 logger = logging.getLogger(__name__)
@@ -20,36 +19,26 @@ class SyncStats:
     failed: dict[str, str] = field(default_factory=dict)  # notes that cannot be indexed, and why
 
 
-def _chunk(source: str, content: bytes) -> list[Chunk]:
-    chunks = chunker.chunk_markdown(content.decode("utf-8-sig"), source)
-    if not chunks:
-        raise ValueError("no content to index")
-    return chunks
-
-
-def _embedded(head: str, paths: list[str], stats: SyncStats) -> Iterator[EmbeddedNote]:
+def _chunk_and_embed_notes(head: str, paths: list[str], stats: SyncStats) -> Iterator[EmbeddedNote]:
     """The notes to write, chunked and embedded one at a time. A note that cannot be indexed is
     recorded in `stats.failed` instead."""
-    readable = []
-    for source, size in git.file_sizes(head, paths).items():
-        if size > config.MAX_NOTE_BYTES:
-            message = f"larger than {config.MAX_NOTE_BYTES} bytes"
-            stats.failed[source] = message
-            logger.warning("skipped %s: %s", source, message)
-        else:
-            readable.append(source)
-    for source, content in git.read_files(head, readable):
+    for source in paths:
         try:
-            chunks = _chunk(source, content)
+            if git.committed_file_size(head, source) > config.MAX_NOTE_BYTES:
+                raise ValueError(f"larger than {config.MAX_NOTE_BYTES} bytes")
+            text = git.read_committed_file(head, source)
+            chunks = chunker.chunk_markdown(text, source)
+            if not chunks:
+                raise ValueError("no content to index")
             vectors = embeddings.embed_documents([chunk.embedding_text for chunk in chunks])
-        except ValueError as error:  # invalid note content or too many tokens
+        except ValueError as error:  # unreadable or empty content, too large or too many tokens
             stats.failed[source] = str(error)
             logger.warning("skipped %s: %s", source, error)
             continue
         yield EmbeddedNote(source, chunks, vectors)
 
 
-def _batches(notes: Iterable[EmbeddedNote]) -> Iterator[list[EmbeddedNote]]:
+def _group_into_write_batches(notes: Iterable[EmbeddedNote]) -> Iterator[list[EmbeddedNote]]:
     """Groups of notes holding about WRITE_BATCH_CHUNKS chunks: every write to the index creates a
     data file, so notes are not written one by one."""
     batch, size = [], 0
@@ -76,7 +65,7 @@ def sync() -> SyncStats:
         stats = SyncStats(removed=len(to_delete))
         if to_write or to_delete:
             store.set_indexed_commit(None)  # partial writes must never claim to match a commit
-        for batch in _batches(_embedded(head, to_write, stats)):
+        for batch in _group_into_write_batches(_chunk_and_embed_notes(head, to_write, stats)):
             store.replace_notes(batch)
             stats.indexed += len(batch)
             stats.chunks += sum(len(note.chunks) for note in batch)

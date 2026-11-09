@@ -63,7 +63,7 @@ def test_a_second_sync_reads_nothing(vault, publish, monkeypatch):
     (vault / "aws-keys.md").write_text(AWS)
     publish()
     indexer.sync()
-    monkeypatch.setattr(git, "read_files", lambda _c, paths: pytest.fail("read") if paths else [])
+    monkeypatch.setattr(git, "read_committed_file", lambda *_: pytest.fail("read"))
     monkeypatch.setattr(Store, "sources", lambda _self: pytest.fail("scan"))
     assert indexer.sync() == indexer.SyncStats()
 
@@ -211,13 +211,13 @@ def test_oversized_notes_are_rejected_before_reading_and_leave_nothing_stale(
     (vault / "big.md").write_bytes(b"x" * (limit + 1))
     (vault / "good.md").write_text(AWS)
     publish()
-    real_read = git.read_files
+    real_read = git.read_committed_file
 
-    def read_only_small_files(head, paths):
-        assert paths == ["notes/good.md"]
-        return real_read(head, paths)
+    def read_only_small_files(head, path):
+        assert path == "notes/good.md"
+        return real_read(head, path)
 
-    monkeypatch.setattr(git, "read_files", read_only_small_files)
+    monkeypatch.setattr(git, "read_committed_file", read_only_small_files)
     stats = indexer.sync()
     assert stats.indexed == 1
     assert stats.failed == {"notes/big.md": f"larger than {limit} bytes"}
@@ -386,7 +386,7 @@ def test_open_index_does_not_check_git_read_notes_or_write_the_index(vault, publ
     with open_index() as index:
         version = index._table.version
         marker_inode = (config.DB_DIR / "indexed").stat().st_ino
-    monkeypatch.setattr(git, "read_files", lambda *_: pytest.fail("read notes"))
+    monkeypatch.setattr(git, "read_committed_file", lambda *_: pytest.fail("read notes"))
     monkeypatch.setattr(Store, "sources", lambda _: pytest.fail("scan sources"))
     monkeypatch.setattr(Store, "rebuild_if_needed", lambda _: pytest.fail("rebuild"))
     monkeypatch.setattr(git, "remote_branch_tip", lambda *_: pytest.fail("check Git"))

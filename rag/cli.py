@@ -60,18 +60,14 @@ def _parser() -> argparse.ArgumentParser:
 def main() -> None:
     logging.basicConfig(level=logging.WARNING, format="%(message)s")
     args = _parser().parse_args()
+    commands = {
+        "sync": _sync,
+        "query": lambda: _query(" ".join(args.question)),
+        "status": _status,
+        "model": _model,
+    }
     try:
-        match args.command:
-            case "sync":
-                code = _sync()
-            case "query":
-                code = _query(" ".join(args.question))
-            case "status":
-                code = _status()
-            case "model":
-                code = _model()
-            case _:
-                raise ValueError(f"Unknown command: {args.command}")
+        code = commands[args.command]()
     except (OSError, ValueError, RuntimeError) as error:
         print(f"rag: {error}", file=sys.stderr)
         code = 1

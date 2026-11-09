@@ -240,7 +240,8 @@ version.
 `.rag/` is your own local index. It can always be rebuilt from the notes and is never committed.
 
 CLI and MCP search requests use `store.open_index` to open an existing, complete index and hold
-the index lock until retrieval finishes. Missing, incomplete or incompatible caches produce an
+the index lock until retrieval finishes. If a sync holds the lock for longer than
+`READ_LOCK_TIMEOUT` (5 s), the search reports that the index is being synchronized. Missing, incomplete or incompatible caches produce an
 error asking for `rag sync`; retrieval never checks Git, creates a table or rebuilds a cache.
 `search.py` only searches the supplied database; it does not read Git or synchronize anything.
 Synchronization compares the index with the configured remote branch and changes indexed

@@ -72,23 +72,12 @@ RAG_DIR: Path = ROOT / ".rag"  # the local index and model: never committed, alw
 DB_DIR: Path = RAG_DIR / "lancedb"
 LOCK_PATH: Path = RAG_DIR / "sync.lock"
 
-INDEX_AFTER_ROWS: int = 50_000  # from here on, search uses an approximate index, not a full scan
+READ_LOCK_TIMEOUT: float = 5  # seconds a search waits for a running sync before giving up
 WRITE_BATCH_CHUNKS: int = 2000  # chunks per write, since each write creates a data file
-SEARCH_NPROBES: int = 40
-SEARCH_REFINE_FACTOR: int = 10
 
 # Apache-2.0 and multilingual. fastembed does not list it, so embeddings.py registers it.
 MODEL: str = "Snowflake/snowflake-arctic-embed-m-v2.0"
-MODEL_FILE: str = "onnx/model_int8.onnx"
-MODEL_FILES: list[str] = [
-    "config.json",
-    "tokenizer.json",
-    "tokenizer_config.json",
-    "special_tokens_map.json",
-]
 EMBEDDING_SIZE: int = 768
 # The context includes section paths and special tokens.
 MODEL_MAX_TOKENS: int = 8192
 MODEL_CACHE_DIR: str = str(RAG_DIR / "models")
-EMBED_BATCH_SIZE: int = 8  # fastembed's default of 256 needs about 10 GB of memory
-QUERY_PREFIX: str = "query: "  # the model wants it on questions, not on notes

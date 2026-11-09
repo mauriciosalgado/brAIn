@@ -11,7 +11,7 @@ Rules: keep it simple · measure before adding · nothing is committed without t
 - [x] Chunker: one chunk per heading (`rag/index/chunker.py`); long sections are split at paragraph, line or word
       breaks. Checked on a 70-note team vault + 12 messy notes (`tests/fixtures/`): size limit, no text lost
 - [x] Embedder: arctic-embed-m-v2.0 int8 (multilingual, Apache-2.0, 320 MB, registered as a fastembed custom model), small batches, query prefix, model cached in `.rag/models`, repaired by `rag model`
-- [x] Local index: LanceDB in `.rag/`, exact scan below 50k chunks, IVF-HNSW above
+- [x] Local index: LanceDB in `.rag/`, exact scan (a vector index is unnecessary below ~100k chunks)
 - [x] Index follows git: what git reports as A / M / D since the last indexed commit is indexed / re-indexed /
       removed (`rag/git.py` plans; `rag/index/indexer.py` applies); one marker (the commit) says if the index is fresh
 - [x] Git flow: `.githooks/` + `setup.sh` + `doctor.sh`; sync updates the index, while CLI/MCP
@@ -43,7 +43,7 @@ Then:
 - [ ] Re-tune chunk size (1000 chars) for the current model, and the 0.10 score margin, with `rag eval`
 - [ ] Exact-identifier boost (`aws-rds-copy`, error codes, flags): BM25 hybrid gave no gain on paraphrased
       questions, but identifier queries were not measured
-- [x] MCP `search_notes` returns plain text: one `<passage rank source section>` block per chunk, text unescaped
+- [x] MCP `search_notes` returns plain text: one `<passage rank source section>` block per chunk, text as written, except that `<passage` tags in it are escaped
 - [x] MCP `read_note(path)`: current Markdown files through `notes.read_note`, with shared path rules
 - [ ] MCP `list_notes(folder)`
 - [x] `brain.toml`: the settings a user may change (branch, skipped folders and headings, result count, score
@@ -79,7 +79,8 @@ Then:
 - The index follows the configured remote-tracking branch (`origin/main` by default), whichever
   branch is checked out. Unpushed commits are never indexed. A rename is a delete + add.
   Hooks normally sync after push/fetch/pull; a missed or failed sync requires `rag sync`.
-  Search opens the existing index and holds its lock through retrieval. It never checks Git,
+  Search opens the existing index and holds its lock through retrieval, waiting at most
+  `READ_LOCK_TIMEOUT` for a running sync. It never checks Git,
   synchronizes, or rebuilds missing/incompatible caches.
 - Sync reads published notes from the commit (`git cat-file`). Whole-note reads use current files
   through `notes.read_note`, so they may show newer edits than search. The read implementation is

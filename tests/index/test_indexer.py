@@ -472,6 +472,18 @@ def test_a_sync_waits_for_another_one_to_finish(vault, publish):
     assert time.monotonic() - started >= 0.4
 
 
+def test_a_search_does_not_wait_forever_for_a_sync(vault, publish, monkeypatch):
+    (vault / "cake.md").write_text(CAKE)
+    publish()
+    indexer.sync()
+    monkeypatch.setattr(config, "READ_LOCK_TIMEOUT", 0.1)
+    with index_lock():
+        with pytest.raises(RuntimeError, match="synchronized"), open_index():
+            pass
+        with pytest.raises(RuntimeError, match="synchronized"):
+            indexer.status()
+
+
 def fragments() -> int:
     return Store()._table.stats()["fragment_stats"]["num_fragments"]
 
@@ -500,16 +512,3 @@ def test_deleted_rows_are_compacted_away(vault, publish, vault_git):
     publish()
     indexer.sync()
     assert Store()._table.stats()["num_deleted_rows"] == 0
-
-
-def test_a_vector_index_is_built_and_kept_current(vault, publish, monkeypatch):
-    monkeypatch.setattr(config, "INDEX_AFTER_ROWS", 4)
-    (vault / "aws-keys.md").write_text(AWS * 2)
-    (vault / "cake.md").write_text(CAKE * 2)
-    publish()
-    indexer.sync()
-    assert Store()._has_vector_index()
-    (vault / "vpn.md").write_text(numbered(1) * 2)
-    publish()
-    indexer.sync()
-    assert Store()._table.index_stats(store.VECTOR_INDEX).num_unindexed_rows == 0

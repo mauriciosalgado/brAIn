@@ -6,15 +6,15 @@ Opening an existing table never rebuilds it; synchronization explicitly handles 
 
 import hashlib
 import os
+from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import timedelta
 from pathlib import Path
-from typing import NamedTuple
+from typing import NamedTuple, TypedDict, cast
 
 import lancedb
 import pyarrow as pa
-from filelock import FileLock
-from lancedb.index import IvfHnswSq
+from filelock import BaseFileLock, FileLock, Timeout
 from lancedb.query import LanceVectorQueryBuilder
 
 from rag import config
@@ -30,8 +30,8 @@ SCHEMA = pa.schema(
         ("vector", pa.list_(pa.float32(), config.EMBEDDING_SIZE)),
     ]
 )
-VECTOR_INDEX = "vector_idx"
 _INDEX_UNAVAILABLE = "No usable search index. Run 'uv run rag sync' first."
+_SYNC_RUNNING = "The index is being synchronized. Try again in a moment."
 
 # Everything that decides what is stored. When it changes, the index is rebuilt from the notes.
 FINGERPRINT = hashlib.sha256(
@@ -50,23 +50,43 @@ FINGERPRINT = hashlib.sha256(
 ).hexdigest()
 
 
-@contextmanager
-def index_lock():
+def index_lock(timeout: float = -1) -> BaseFileLock:
     """Keep index updates and readers from mixing table snapshots with commit markers."""
-    with FileLock(config.LOCK_PATH):
+    return FileLock(config.LOCK_PATH, timeout=timeout)
+
+
+@contextmanager
+def read_lock() -> Generator[None]:
+    """The index lock for a reader. A sync can hold it for minutes, so a reader says so instead
+    of hanging."""
+    lock = index_lock(config.READ_LOCK_TIMEOUT)
+    try:
+        lock.acquire()
+    except Timeout as error:
+        raise RuntimeError(_SYNC_RUNNING) from error
+    try:
         yield
+    finally:
+        lock.release()
 
 
 @contextmanager
 def open_index():
     """Open a complete existing index for retrieval, without checking Git or synchronizing."""
-    if not config.DB_DIR.is_dir():
-        raise RuntimeError(_INDEX_UNAVAILABLE)
-    with index_lock():
+    with read_lock():
         store = Store(create=False)
         if store.indexed_commit() is None:
             raise RuntimeError(_INDEX_UNAVAILABLE)
         yield store
+
+
+class Hit(TypedDict):
+    """A chunk found by a search."""
+
+    text: str
+    source: str
+    header_path: str
+    score: float  # cosine similarity, higher is closer
 
 
 class EmbeddedNote(NamedTuple):
@@ -161,17 +181,13 @@ class Store:
     def count(self) -> int:
         return self._table.count_rows()
 
-    def search(self, vector: list[float], limit: int) -> list[dict]:
-        """The `limit` chunks most similar to `vector`, best first. The two tuning settings only
-        apply when there is a vector index (large indexes); without one the scan is exact."""
-        query = self._table.search(vector)
-        if not isinstance(query, LanceVectorQueryBuilder):
-            raise RuntimeError("LanceDB did not create a vector query")
+    def search(self, vector: list[float], limit: int) -> list[Hit]:
+        """The `limit` chunks most similar to `vector`, best first. It is an exact scan: LanceDB
+        advises a vector index only from about a million rows."""
         query = (
-            query.metric("cosine")
+            cast(LanceVectorQueryBuilder, self._table.search(vector))
+            .distance_type("cosine")
             .limit(limit)
-            .nprobes(config.SEARCH_NPROBES)
-            .refine_factor(config.SEARCH_REFINE_FACTOR)
             .select(["text", "source", "header_path", "_distance"])
         )
         return [
@@ -184,18 +200,6 @@ class Store:
             for row in query.to_list()
         ]
 
-    def _has_vector_index(self) -> bool:
-        return any(i.name == VECTOR_INDEX for i in self._table.list_indices())
-
-    def maintain(self) -> None:
-        """Keep search fast as the index grows and changes."""
-        rows = self.count()
-        if rows >= config.INDEX_AFTER_ROWS and not self._has_vector_index():
-            self._table.create_index(
-                "vector",
-                config=IvfHnswSq(distance_type="cosine", num_partitions=max(8, int(rows**0.5 / 2))),
-                name=VECTOR_INDEX,
-            )
-        # Merges small files, adds new rows to the vector index, drops old versions: it costs
-        # 0.03 s at 200,000 rows when there is nothing to do.
+    def optimize(self) -> None:
+        """Merge the small data files that writes leave and drop old table versions."""
         self._table.optimize(cleanup_older_than=timedelta(days=1))

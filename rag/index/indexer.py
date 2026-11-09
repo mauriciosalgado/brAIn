@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from rag import config, git
 from rag.index import chunker, embeddings
 from rag.index.chunker import Chunk
-from rag.index.store import EmbeddedNote, Store, index_lock
+from rag.index.store import EmbeddedNote, Store, index_lock, read_lock
 
 logger = logging.getLogger(__name__)
 
@@ -46,8 +46,6 @@ def _embedded(head: str, paths: list[str], stats: SyncStats) -> Iterator[Embedde
             stats.failed[source] = str(error)
             logger.warning("skipped %s: %s", source, error)
             continue
-        stats.indexed += 1
-        stats.chunks += len(chunks)
         yield EmbeddedNote(source, chunks, vectors)
 
 
@@ -80,10 +78,12 @@ def sync() -> SyncStats:
             store.set_indexed_commit(None)  # partial writes must never claim to match a commit
         for batch in _batches(_embedded(head, to_write, stats)):
             store.replace_notes(batch)
+            stats.indexed += len(batch)
+            stats.chunks += sum(len(note.chunks) for note in batch)
         store.delete_notes(to_delete + list(stats.failed))  # nothing stale stays for a failed note
         store.set_indexed_commit(head)
         if to_write or to_delete:
-            store.maintain()
+            store.optimize()
         return stats
 
 
@@ -99,16 +99,12 @@ class Status:
 def status() -> Status:
     """Compare the index with Git without creating it, embedding or synchronizing notes."""
     # Read counts and the commit marker from the same locked snapshot.
-    with index_lock():
+    with read_lock():
         head = git.remote_branch_tip(config.REMOTE, config.BRANCH)
-        store = Store(create=False) if config.DB_DIR.is_dir() else None
-        indexed = store.indexed_commit() if store is not None else None
-        sources = store.sources() if store is not None else set()
+        if config.DB_DIR.is_dir():
+            store = Store(create=False)
+            indexed, sources, chunks = store.indexed_commit(), store.sources(), store.count()
+        else:
+            indexed, sources, chunks = None, set(), 0
         writes, deletes = git.plan_index(indexed, head, sources)
-        return Status(
-            head,
-            indexed,
-            len(writes) + len(deletes),
-            len(sources),
-            store.count() if store is not None else 0,
-        )
+        return Status(head, indexed, len(writes) + len(deletes), len(sources), chunks)

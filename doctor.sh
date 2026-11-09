@@ -31,9 +31,7 @@ index_branch() {
 # Hooks only run when git is pointed at .githooks and the scripts are executable.
 hooks_enabled() {
   [ "$(git config --get core.hooksPath)" = .githooks ] || return 1
-  for hook in sync-notes post-merge post-rewrite; do
-    [ -x ".githooks/$hook" ] || return 1
-  done
+  [ -x .githooks/reference-transaction ]
 }
 
 check "git 2.42+ installed" "https://git-scm.com/; run from a Git clone" git cat-file --batch -Z </dev/null

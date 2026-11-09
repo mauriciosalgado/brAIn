@@ -41,7 +41,7 @@ uv run ty check rag   # types
 | `rag/` | `config.py` (settings), `cli.py` (terminal commands), `mcp/server.py` (the tools for agents) |
 | `brain.toml` | Settings the user may change. Loaded when a process starts. |
 | `STANDARDS.md`, `templates/` | How notes are written. Served to agents by the tools. |
-| `setup.sh`, `doctor.sh`, `.githooks/` | Install, check, and the hooks that sync the index after a pull |
+| `setup.sh`, `doctor.sh`, `.githooks/` | Install, check, and the hook that syncs the index after local branch changes |
 | `tests/` | Tests, laid out like `rag/`. `tests/fixtures/` holds sample notes used to test the chunker. |
 
 Conventions:
@@ -55,8 +55,9 @@ Conventions:
 - Opening an existing store must not rebuild it. Only synchronization rebuilds incompatible
   caches and clears the commit marker before changing notes.
 - The MCP `read_note` tool validates note paths and decodes Git's raw committed-file bytes.
-- Sync hooks are required. Setup enables `.githooks`; doctor checks them. Hooks sync after a
-  pull, merge or rebase, without fetching or pulling themselves.
+- The sync hook is required. Setup enables `.githooks`; doctor checks it. `reference-transaction`
+  runs sync after committed local branch-ref updates and reports the result, without fetching
+  or pulling.
 - Keep imports at module level, except heavy CLI dependencies: import those inside command
   handlers so help stays lightweight. Keep the CLI in one file with explicit command dispatch;
   pass ordinary values to handlers, not argparse objects.

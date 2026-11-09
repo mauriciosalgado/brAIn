@@ -33,9 +33,11 @@ git clone <your-repo-url> brAIn && cd brAIn
 
 Developed and tested on macOS. Linux should work the same; on Windows, use WSL (not tested).
 
-The sync hooks are required. Setup sets this repository's `core.hooksPath` to `.githooks`,
-replacing any custom hooks path with a warning. Doctor checks that the hooks are enabled and
-executable. They trigger local indexing after a pull, merge or rebase; they do not fetch or pull.
+The sync hook is required. Setup sets this repository's `core.hooksPath` to `.githooks`,
+replacing any custom hooks path with a warning. Doctor checks that the hook is enabled and
+executable. Git's `reference-transaction` hook runs synchronization
+after local branch updates, including commits, pulls, merges, rebases, resets and direct ref
+updates. It does not fetch or pull. Only the configured branch is indexed.
 
 ## Use it
 
@@ -105,16 +107,27 @@ everyone's search the same, and what keeps unfinished notes out of it.
 | | Working alone | Working in a team |
 |---|---------------|-------------------|
 | **You write** | Commit the note on `main` | Commit it on a branch and open a pull request |
-| **It becomes searchable** | On your next search | When the pull request is merged and you `git pull` |
+| **It becomes searchable** | After committing (automatic sync) | When the pull request is merged and you `git pull` |
 | **Other machines or people** | Pull on the other machine | Everyone's next `git pull` updates their search |
 
 - A note is found only once it is **committed** on that branch. Edits you have not committed are
   never indexed.
-- After a `git pull`, only the notes that changed are re-indexed, in the background, in seconds.
-  If that did not run, the next search brings the index up to date first.
+- After local branch updates, only changed notes are re-indexed before Git returns.
+  Git displays the sync command's normal counts, warnings and errors directly.
+  If sync fails, the branch update is not undone; the next search brings the index up to date.
 - Notes you delete or rename disappear from search (a rename is a delete plus an add).
 - The first setup indexes everything once: roughly two minutes for a 1,000-note vault. After that,
   only what changed is indexed.
+
+To check the index against the current branch:
+
+```bash
+uv run rag status
+```
+
+Status exits successfully only when the indexed commit matches the searched branch's current
+local commit, even if no notes changed. A change only on GitHub is not local yet: update your
+local branch first.
 
 ## Configure
 
@@ -206,7 +219,7 @@ version.
 | `rag/index/` | Markdown chunking, embeddings, database operations, synchronization, and search |
 | `rag/mcp/server.py` | Four tools exposing search, whole-note reads, standards, and templates |
 | `rag/config.py`, `rag/cli.py` | Settings and terminal commands |
-| `setup.sh`, `doctor.sh`, `.githooks/` | Install, check, and the hooks that update search after a pull |
+| `setup.sh`, `doctor.sh`, `.githooks/` | Install, check, and the hook that updates search after local branch changes |
 | `AGENTS.md`, `.github/copilot-instructions.md` | Instructions for AI assistants working in this repository |
 | `PLAN.md` | What is done and what is next, with the decisions and measurements |
 

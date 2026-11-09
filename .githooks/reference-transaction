@@ -1,0 +1,15 @@
+#!/bin/sh
+[ "$1" = committed ] || exit 0
+
+changed=false
+while read -r _old _new ref; do
+  case "$ref" in
+    refs/heads/*) changed=true ;;
+  esac
+done
+[ "$changed" = true ] || exit 0
+
+# Git clients often start with a minimal PATH, so the usual uv locations are tried last.
+PATH="$PATH:$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin"
+
+uv run rag sync

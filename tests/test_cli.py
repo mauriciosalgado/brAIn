@@ -61,6 +61,25 @@ def test_io_failures_are_messages_not_tracebacks(monkeypatch, capsys):
     assert code == 1 and "rag: disk full" in err and "Traceback" not in err
 
 
+def test_status_requires_the_current_commit_even_when_no_notes_changed(
+    vault, commit, monkeypatch, capsys
+):
+    (vault / "aws-keys.md").write_text(AWS)
+    indexed = commit()
+    indexer.sync()
+    (vault.parent / "README.md").write_text("Only documentation changed.\n")
+    head = commit()
+    code, out, _ = run_cli(monkeypatch, capsys, "status")
+    assert code == 1 and "0 to update" in out
+    assert f"index at {indexed[:7]}, main at {head[:7]}" in out
+    monkeypatch.setattr(
+        embeddings, "embed_documents", lambda _: pytest.fail("unchanged notes were embedded")
+    )
+    indexer.sync()
+    code, out, _ = run_cli(monkeypatch, capsys, "status")
+    assert code == 0 and f"index at {head[:7]}, main at {head[:7]}" in out
+
+
 def test_help_does_not_load_settings_or_the_indexing_stack():
     code = (
         "import sys\n"

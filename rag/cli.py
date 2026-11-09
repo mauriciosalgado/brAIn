@@ -34,7 +34,7 @@ def _status() -> int:
     indexed = (status.indexed_commit or "nothing")[:7]
     print(f"{status.notes} notes indexed ({status.chunks} chunks), {status.pending} to update")
     print(f"index at {indexed}, {config.BRANCH} at {status.branch_tip[:7]}")
-    return 1 if status.pending or status.indexed_commit is None else 0
+    return 0 if status.indexed_commit == status.branch_tip else 1
 
 
 def _model() -> int:

@@ -8,18 +8,14 @@ from fastembed import TextEmbedding
 from fastembed.common.model_description import ModelSource, PoolingType
 from fastembed.text.onnx_embedding import OnnxTextEmbedding
 
-from rag.config import (
-    EMBED_BATCH_SIZE,
-    EMBEDDING_SIZE,
-    MODEL,
-    MODEL_CACHE_DIR,
-    MODEL_FILE,
-    MODEL_FILES,
-    MODEL_MAX_TOKENS,
-    QUERY_PREFIX,
-)
+from rag.config import EMBEDDING_SIZE, MODEL, MODEL_CACHE_DIR, MODEL_MAX_TOKENS
 
-# fastembed does not list this model, so it is registered here.
+MODEL_FILE = "onnx/model_int8.onnx"  # the 320 MB quantized weights, not the default full-size ones
+EMBED_BATCH_SIZE = 8  # fastembed's default of 256 needs about 10 GB of memory
+QUERY_PREFIX = "query: "  # the model wants it on questions, not on notes
+
+# fastembed does not list this model, so it is registered here. Its tokenizer and config files
+# are downloaded by default.
 TextEmbedding.add_custom_model(
     model=MODEL,
     pooling=PoolingType.CLS,
@@ -27,9 +23,6 @@ TextEmbedding.add_custom_model(
     sources=ModelSource(hf=MODEL),
     dim=EMBEDDING_SIZE,
     model_file=MODEL_FILE,
-    license="apache-2.0",
-    size_in_gb=0.31,
-    additional_files=MODEL_FILES,
 )
 
 
@@ -54,11 +47,18 @@ def get_model() -> OnnxTextEmbedding:
         ) from error
 
 
-def model_works() -> bool:
-    """Whether the model is on disk and gives vectors of the right size. Never downloads."""
+def _embeds(model: OnnxTextEmbedding) -> bool:
+    """Whether the model gives vectors of the right size."""
     try:
-        model = _load_model(local_files_only=True)
         return len(next(iter(model.embed(["test"])))) == EMBEDDING_SIZE
+    except Exception:  # damaged files raise many different errors
+        return False
+
+
+def model_works() -> bool:
+    """Whether the model is on disk and works. Never downloads."""
+    try:
+        return _embeds(_load_model(local_files_only=True))
     except Exception:  # missing, partial or corrupt files raise many different errors
         return False
 
@@ -70,8 +70,7 @@ def ensure_model() -> None:
     get_model.cache_clear()
     if Path(MODEL_CACHE_DIR).exists():
         shutil.rmtree(MODEL_CACHE_DIR)  # a damaged download is not resumed
-    get_model()
-    if not model_works():
+    if not _embeds(get_model()):
         raise RuntimeError(f"The embedding model {MODEL} was downloaded but does not work")
 
 

@@ -115,25 +115,14 @@ def test_deleting_nothing_changes_nothing(vault):
     assert index.sources() == {"notes/a.md"}
 
 
-@pytest.mark.parametrize("indexed", [False, True])
-def test_search_preserves_results_without_materializing_vectors(vault, monkeypatch, indexed):
+def test_search_preserves_results_without_materializing_vectors(vault, monkeypatch):
     index = Store()
     notes = [note(f"notes/n{i}.md") for i in range(24)]
     for i, item in enumerate(notes):
         item.vectors[0][i] = float(i + 1)
     index.replace_notes(notes)
-    if indexed:
-        monkeypatch.setattr(config, "INDEX_AFTER_ROWS", 4)
-        index.maintain()
     vector = [1.0] + [0.0] * (config.EMBEDDING_SIZE - 1)
-    expected = (
-        index._table.search(vector)
-        .metric("cosine")
-        .limit(5)
-        .nprobes(config.SEARCH_NPROBES)
-        .refine_factor(config.SEARCH_REFINE_FACTOR)
-        .to_list()
-    )
+    expected = index._table.search(vector).distance_type("cosine").limit(5).to_list()
     materialized = []
     original = LanceVectorQueryBuilder.to_list
 

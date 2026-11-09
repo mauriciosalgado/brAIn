@@ -9,6 +9,7 @@ Sections under a skipped heading are left out.
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 from markdown_it import MarkdownIt
 
@@ -54,6 +55,14 @@ class Section:
     end: int
 
 
+class Piece(NamedTuple):
+    """Text that may become a chunk, under one heading path."""
+
+    path: str
+    text: str
+    whole_section: bool  # the text is all of its section, not a part of a section that was split
+
+
 def chunk_markdown(text: str, source: str) -> list[Chunk]:
     """The chunks of a note, in reading order. `source` is the note's path."""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
@@ -61,14 +70,14 @@ def chunk_markdown(text: str, source: str) -> list[Chunk]:
     headings = _headings(lines)
     title = _note_title(headings, source)
 
-    pieces: list[tuple[str, str, bool]] = []  # (heading path, text, is the whole section)
+    pieces: list[Piece] = []
     for section in _sections(headings, lines, title):
         section_text = "\n".join(lines[section.start : section.end])
         if _content_length(section_text) > 0:  # a heading with nothing under it makes no chunk
             texts = _split(section_text, MAX_CHUNK_SIZE)
-            pieces += [(section.path, text, len(texts) == 1) for text in texts]
+            pieces += [Piece(section.path, text, len(texts) == 1) for text in texts]
 
-    return [Chunk(text, path, i) for i, (path, text) in enumerate(_merge_tiny(pieces))]
+    return [Chunk(p.text, p.path, i) for i, p in enumerate(_merge_tiny(pieces))]
 
 
 def _blank_out_frontmatter(text: str) -> str:
@@ -124,12 +133,16 @@ def _sections(headings: list[Heading], lines: list[str], title: str) -> list[Sec
     skipped_level = None  # the level of the skipped heading we are inside, if any
     for i, heading in enumerate(headings):
         if skipped_level is not None and heading.level > skipped_level:
+            continue  # a sub-heading of a skipped heading
+        if heading.name.lower() in _SKIPPED_HEADINGS:
+            skipped_level = heading.level
             continue
-        skipped_level = heading.level if heading.name.lower() in _SKIPPED_HEADINGS else None
-        if skipped_level is not None:
-            continue
-        names_above = {level: name for level, name in names_above.items() if level < heading.level}
-        names_above[heading.level] = _shorten(heading.name) or (title if heading.level == 1 else "")
+        skipped_level = None
+        name = _shorten(heading.name)
+        if not name and heading.level == 1:
+            name = title  # an empty `#` heading takes the note's title
+        names_above = {lv: above for lv, above in names_above.items() if lv < heading.level}
+        names_above[heading.level] = name
         end = headings[i + 1].line if i + 1 < len(headings) else len(lines)
         path = _heading_path(names_above, title)
         sections.append(Section(path, heading.line, end))
@@ -164,23 +177,23 @@ def _split(text: str, limit: int, breaks: tuple[str, ...] = _BREAKS) -> list[str
     return [piece.rstrip() for piece in [*pieces, current] if piece.strip()]
 
 
-def _merge_tiny(pieces: list[tuple[str, str, bool]]) -> list[tuple[str, str]]:
+def _merge_tiny(pieces: list[Piece]) -> list[Piece]:
     """Join a tiny piece to the piece before it, or, for a tiny start (often a title and a line of
     tags), to the piece after, while the result still fits. A piece of a long section is only
     joined within its own section, so a chunk never sits under the wrong heading path."""
-    merged: list[tuple[str, str]] = []
-    for path, text, whole_section in pieces:
-        if len(merged) == 1 and _is_tiny(merged[0][1]) and _fits(merged[0][1], text):
-            merged[0] = (path, merged[0][1] + "\n\n" + text)
+    merged: list[Piece] = []
+    for piece in pieces:
+        if len(merged) == 1 and _is_tiny(merged[0].text) and _fits(merged[0].text, piece.text):
+            merged[0] = piece._replace(text=merged[0].text + "\n\n" + piece.text)
         elif (
             merged
-            and _is_tiny(text)
-            and _fits(merged[-1][1], text)
-            and (whole_section or merged[-1][0] == path)
+            and _is_tiny(piece.text)
+            and _fits(merged[-1].text, piece.text)
+            and (piece.whole_section or merged[-1].path == piece.path)
         ):
-            merged[-1] = (merged[-1][0], merged[-1][1] + "\n\n" + text)
+            merged[-1] = merged[-1]._replace(text=merged[-1].text + "\n\n" + piece.text)
         else:
-            merged.append((path, text))
+            merged.append(piece)
     return merged
 
 

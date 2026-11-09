@@ -11,10 +11,11 @@ from datetime import timedelta
 from pathlib import Path
 from typing import NamedTuple
 
+import lancedb
 import pyarrow as pa
 from filelock import FileLock
-from lancedb.db import LanceDBConnection
 from lancedb.index import IvfHnswSq
+from lancedb.query import LanceVectorQueryBuilder
 
 from rag import config
 from rag.index import chunker
@@ -51,7 +52,6 @@ FINGERPRINT = hashlib.sha256(
 @contextmanager
 def write_lock():
     """Keep updates and prepared readers from mixing table snapshots with newer commit markers."""
-    config.RAG_DIR.mkdir(parents=True, exist_ok=True)
     with FileLock(config.LOCK_PATH):
         yield
 
@@ -74,8 +74,7 @@ class Store:
     """LanceDB passage operations and the marker identifying the indexed commit."""
 
     def __init__(self) -> None:
-        config.DB_DIR.mkdir(parents=True, exist_ok=True)
-        self._db = LanceDBConnection(config.DB_DIR)
+        self._db = lancedb.connect(config.DB_DIR)
         self._marker = config.DB_DIR / "indexed"
         if TABLE in self._db.list_tables().tables:
             self._table = self._db.open_table(TABLE)
@@ -112,8 +111,8 @@ class Store:
 
     def sources(self) -> set[str]:
         """The path of every indexed note."""
-        rows = self._table.search().select(["source"]).limit(max(self.count(), 1)).to_arrow()
-        return set(rows.column("source").to_pylist())
+        batches = self._table.search().select(["source"]).limit(None).to_batches()
+        return {source for batch in batches for source in batch.column("source").to_pylist()}
 
     def replace_notes(self, notes: list[EmbeddedNote]) -> None:
         """Store these notes in place of what the index holds for them, in one atomic write: a
@@ -148,12 +147,15 @@ class Store:
     def search(self, vector: list[float], limit: int) -> list[dict]:
         """The `limit` chunks most similar to `vector`, best first. The two tuning settings only
         apply when there is a vector index (large indexes); without one the scan is exact."""
+        query = self._table.search(vector)
+        if not isinstance(query, LanceVectorQueryBuilder):
+            raise RuntimeError("LanceDB did not create a vector query")
         query = (
-            self._table.search(vector)
-            .metric("cosine")
+            query.metric("cosine")
             .limit(limit)
             .nprobes(config.SEARCH_NPROBES)
             .refine_factor(config.SEARCH_REFINE_FACTOR)
+            .select(["text", "source", "header_path", "_distance"])
         )
         return [
             {

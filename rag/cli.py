@@ -1,21 +1,24 @@
+"""Terminal commands; defer engine imports so help stays lightweight."""
+
 import argparse
 import logging
 import sys
 
-from rag import config
-from rag.index import embeddings, indexer, search
 
+def _sync() -> int:
+    from rag.index import indexer
 
-def _sync(_args) -> int:
     stats = indexer.sync()
     print(f"{stats.indexed} indexed ({stats.chunks} chunks), {stats.removed} removed")
-    for source, reason in stats.failed.items():
-        print(f"skipped {source}: {reason}", file=sys.stderr)
     return 1 if stats.failed else 0
 
 
-def _query(args) -> int:
-    for hit in search.query(" ".join(args.question)):
+def _query(question: str) -> int:
+    from rag.index import indexer, search
+
+    with indexer.prepare_index() as store:
+        hits = search.query(question, store)
+    for hit in hits:
         print(f"Source:  {hit['source']}")
         print(f"Section: {hit['header_path']}")
         print(f"Score:   {hit['score']:.2f}")
@@ -23,7 +26,10 @@ def _query(args) -> int:
     return 0
 
 
-def _status(_args) -> int:
+def _status() -> int:
+    from rag import config
+    from rag.index import indexer
+
     status = indexer.status()
     indexed = (status.indexed_commit or "nothing")[:7]
     print(f"{status.notes} notes indexed ({status.chunks} chunks), {status.pending} to update")
@@ -31,7 +37,9 @@ def _status(_args) -> int:
     return 1 if status.pending or status.indexed_commit is None else 0
 
 
-def _model(_args) -> int:
+def _model() -> int:
+    from rag.index import embeddings
+
     embeddings.ensure_model()
     print("The embedding model is ready")
     return 0
@@ -40,18 +48,11 @@ def _model(_args) -> int:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="rag", description="Search your notes.")
     commands = parser.add_subparsers(dest="command", required=True, metavar="command")
-    commands.add_parser("sync", help="index what changed on the searched branch").set_defaults(
-        run=_sync
-    )
+    commands.add_parser("sync", help="index what changed on the searched branch")
     query = commands.add_parser("query", help="show the passages that best match a question")
-    query.add_argument("question", nargs="+")
-    query.set_defaults(run=_query)
-    commands.add_parser("status", help="say whether the index is up to date").set_defaults(
-        run=_status
-    )
-    commands.add_parser("model", help="download the search model, or repair it").set_defaults(
-        run=_model
-    )
+    query.add_argument("question", nargs="+", help="question, quoted or unquoted")
+    commands.add_parser("status", help="say whether the index is up to date")
+    commands.add_parser("model", help="download the search model, or repair it")
     return parser
 
 
@@ -59,8 +60,18 @@ def main() -> None:
     logging.basicConfig(level=logging.WARNING, format="%(message)s")
     args = _parser().parse_args()
     try:
-        code = args.run(args)
-    except (ValueError, RuntimeError) as error:  # a clear message, not a traceback
+        match args.command:
+            case "sync":
+                code = _sync()
+            case "query":
+                code = _query(" ".join(args.question))
+            case "status":
+                code = _status()
+            case "model":
+                code = _model()
+            case _:
+                raise ValueError(f"Unknown command: {args.command}")
+    except (OSError, ValueError, RuntimeError) as error:
         print(f"rag: {error}", file=sys.stderr)
         code = 1
     sys.exit(code)

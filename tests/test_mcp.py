@@ -1,5 +1,6 @@
 import asyncio
 import re
+from xml.etree.ElementTree import fromstring
 
 import pytest
 from fastmcp import Client
@@ -29,6 +30,10 @@ def call(query: str, **arguments) -> str:
 
 def passages(text: str) -> list[str]:
     return re.findall(r"<passage .*?</passage>", text, re.DOTALL)
+
+
+def attributes(passage: str) -> dict[str, str]:
+    return fromstring(passage.partition("\n")[0][:-1] + "/>").attrib
 
 
 def test_the_tool_is_listed_with_a_description():
@@ -61,8 +66,22 @@ def test_search_returns_readable_passages_with_citations(vault, commit):
     assert text.startswith("1 passage, best match first")
     assert "search again with other words" in text
     assert f"(relative to {config.ROOT})" in text
-    assert first.startswith('<passage rank="1" source="notes/keys.md" section="Keys > Rotation">')
+    assert attributes(first) == {
+        "rank": "1",
+        "source": "notes/keys.md",
+        "section": "Keys > Rotation",
+    }
     assert "Rotate access keys every ninety days" in first and first.endswith("</passage>")
+
+
+def test_the_request_prepares_the_index_before_retrieval(vault, commit):
+    (vault / "keys.md").write_text(NOTE)
+    commit()
+    assert "ninety" in call("how often do we rotate keys")
+    (vault / "keys.md").write_text(NOTE.replace("ninety", "sixty"))
+    commit()
+    text = call("how often do we rotate keys")
+    assert "sixty" in text and "ninety" not in text
 
 
 def test_the_text_is_not_escaped_or_duplicated_as_structured_data(vault, commit):
@@ -75,11 +94,11 @@ def test_the_text_is_not_escaped_or_duplicated_as_structured_data(vault, commit)
     assert "\\n" not in result.content[0].text and result.structured_content is None
 
 
-def test_quotes_in_a_path_or_heading_cannot_end_the_attribute_early(vault, commit):
+def test_passage_attributes_preserve_quotes_and_special_characters(vault, commit):
     (vault / "odd.md").write_text('# "Quoted" & more\n\n## It\'s "here"\n\n' + "text here. " * 20)
     commit()
     first = passages(call("text here"))[0]
-    assert "section=\"'Quoted' & more > It's 'here'\">" in first
+    assert attributes(first)["section"] == '"Quoted" & more > It\'s "here"'
 
 
 def test_several_passages_come_best_first_with_ranks(vault, commit):
@@ -119,18 +138,45 @@ def call_tool(tool: str, **arguments) -> str:
     return asyncio.run(run())
 
 
-def test_a_path_from_a_search_can_be_read_in_full(vault, commit):
-    (vault / "keys.md").write_text(NOTE + "\n## Last\n\nThe very last words.\n")
+@pytest.mark.parametrize("name", ["keys.md", 'say "hi".md', "it's & <a>.md", "line\nbreak.md"])
+def test_a_path_from_a_search_can_be_read_in_full(vault, commit, name):
+    (vault / name).write_text(NOTE + "\n## Last\n\nThe very last words.\n")
     commit()
-    source = re.search(r'source="([^"]+)"', call("rotate keys")).group(1)
+    source = attributes(passages(call("rotate keys"))[0])["source"]
+    assert source == f"notes/{name}"
     assert call_tool("read_note", path=source).endswith("The very last words.\n")
+
+
+def test_read_note_gives_committed_text_by_relative_or_absolute_path(vault, commit):
+    (vault / "a.md").write_bytes(b"\xef\xbb\xbfcommitted")
+    commit()
+    (vault / "a.md").write_text("edited, not committed")
+    assert call_tool("read_note", path="notes/a.md") == "committed"
+    assert call_tool("read_note", path=str(vault / "a.md")) == "committed"
+
+
+def test_read_note_uses_main_even_when_the_draft_branch_deletes_the_file(vault, commit, vault_git):
+    (vault / "a.md").write_text("committed on main")
+    commit()
+    vault_git("checkout", "-q", "-b", "draft")
+    (vault / "a.md").unlink()
+    commit()
+    assert call_tool("read_note", path="notes/a.md") == "committed on main"
 
 
 def test_only_notes_on_the_branch_can_be_read(vault, commit):
     (vault / "keys.md").write_text(NOTE)
     (vault.parent / "secret.md").write_text("not a note")
+    (vault / ".trash").mkdir()
+    (vault / ".trash" / "gone.md").write_text("hidden")
     commit()
-    for path in ["secret.md", "notes/missing.md", "notes/../secret.md", "/etc/passwd"]:
+    for path in [
+        "secret.md",
+        "notes/missing.md",
+        "notes/../secret.md",
+        "notes/.trash/gone.md",
+        "/etc/passwd",
+    ]:
         with pytest.raises(ToolError, match="No note at"):
             call_tool("read_note", path=path)
 
@@ -145,6 +191,18 @@ def test_an_agent_can_read_the_standards_and_the_templates(vault):
     assert "Name notes in lowercase." in standards and "Templates: note, runbook" in standards
     assert call_tool("get_note_template", template="runbook") == "# {{title}}\n\n## Steps\n"
     assert call_tool("get_note_template").startswith("# {{title}}\n\nTags:")
+
+
+def test_template_discovery_does_not_read_unused_bodies(vault):
+    (vault.parent / "STANDARDS.md").write_text("# Standards\n")
+    templates = vault.parent / "templates"
+    templates.mkdir()
+    (templates / "note-template.md").write_text("# {{title}}\n")
+    (templates / "broken-template.md").write_bytes(b"\xff")
+    assert "Templates: broken, note" in call_tool("get_note_standards")
+    assert call_tool("get_note_template") == "# {{title}}\n"
+    with pytest.raises(ToolError):
+        call_tool("get_note_template", template="broken")
 
 
 def test_the_standards_say_exactly_where_to_create_a_note_and_that_it_is_not_on_main(vault):

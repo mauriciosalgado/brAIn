@@ -2,6 +2,7 @@
 handbooks) and a set of deliberately messy notes of the kind teams paste into Obsidian. Every file
 must satisfy the same guarantees, however it is cut, re-encoded or shuffled."""
 
+import json
 import re
 import statistics
 from pathlib import Path
@@ -10,7 +11,7 @@ import pytest
 from test_chunker import check_invariants
 
 from rag.config import MAX_CHUNK_SIZE
-from rag.notes.chunker import _is_tiny, chunk_markdown
+from rag.index.chunker import _is_tiny, chunk_markdown
 
 FIXTURES = Path(__file__).parents[1] / "fixtures"
 TEAM_NOTES = sorted((FIXTURES / "team-vault" / "notes").glob("**/*.md"))
@@ -63,8 +64,6 @@ def test_the_team_vault_has_no_tiny_or_oversized_chunks():
 
 
 def test_every_answer_section_in_the_gold_set_is_findable():
-    import json
-
     gold = json.loads((FIXTURES / "team-vault" / "gold.json").read_text())
     by_note = {p.stem: chunks_of(p) for p in TEAM_NOTES}
     for question in gold:

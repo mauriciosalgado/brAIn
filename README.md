@@ -23,7 +23,7 @@ runs on your own computer: no cloud, no API keys, no servers to run.
 
 ## Set up (once, a few minutes)
 
-You need **git** and **[uv](https://docs.astral.sh/uv/getting-started/installation/)**.
+You need **Git 2.42+** and **[uv](https://docs.astral.sh/uv/getting-started/installation/)**.
 
 ```bash
 git clone <your-repo-url> brAIn && cd brAIn
@@ -32,6 +32,10 @@ git clone <your-repo-url> brAIn && cd brAIn
 ```
 
 Developed and tested on macOS. Linux should work the same; on Windows, use WSL (not tested).
+
+The sync hooks are required. Setup sets this repository's `core.hooksPath` to `.githooks`,
+replacing any custom hooks path with a warning. Doctor checks that the hooks are enabled and
+executable. They trigger local indexing after a pull, merge or rebase; they do not fetch or pull.
 
 ## Use it
 
@@ -58,7 +62,7 @@ Then ask in plain words. The assistant answers from your notes and names the not
 > *What do my notes say about rotating AWS keys?*
 > *Which steps do we follow to copy an RDS snapshot to another account?*
 
-It gets three tools:
+It gets four tools:
 
 | Tool | What it does |
 |------|--------------|
@@ -118,8 +122,9 @@ everyone's search the same, and what keeps unfinished notes out of it.
 
 [`brain.toml`](brain.toml) holds the settings you may want to change. Every setting is explained
 in the file itself. It is committed, so everyone who uses the repository gets the same settings,
-and it is read every time brAIn runs. Delete a line to get its default. After a change there is
-nothing else to do: notes are re-indexed by themselves when a change needs it.
+and it is read when a process starts. Delete a line to get its default. After changing settings,
+restart your AI assistant. The next sync or index preparation rebuilds the cache only when the
+indexed content needs to change.
 
 | Setting | Default | What it does |
 |---------|---------|--------------|
@@ -165,7 +170,7 @@ them from there.
 | Anything at all | `./doctor.sh` |
 | Is my search up to date? | `uv run rag status` |
 | A note does not show up | It must be committed on the searched branch (merged, if you use pull requests), and you must have pulled |
-| A note is reported as skipped | `rag sync` lists notes it cannot index: empty notes, notes over 2 MB, notes that are not UTF-8 text |
+| A note is reported as skipped | `rag sync` reports empty notes, notes over 2 MB, invalid UTF-8 and inputs over the model's token limit |
 | Search returns nothing or is broken | Rebuild the local index: `rm -rf .rag/lancedb && uv run rag sync` |
 | The search model is missing or damaged | `uv run rag model` |
 | Your assistant does not see brAIn | Check the path in its MCP settings, then restart the assistant |
@@ -181,8 +186,11 @@ version.
 - **Only notes under `notes/`**, in `.md` files, outside hidden folders such as `.trash`.
 - **Multilingual.** The search model supports many languages, German among them. Our own
   measurements so far are on English notes.
-- **Resources.** The search model needs about 1.4 GB of memory while running and 320 MB of disk.
-  The first search in a session takes a couple of seconds while it loads.
+- **Resources.** With default chunk sizes, the search model needs about 1.4 GB of memory while
+  running and 320 MB of disk. Longer passages need more memory. The first search in a session
+  takes a couple of seconds while it loads.
+- **Model input.** Passages include their section paths and must fit within 8,192 tokens.
+  Oversized inputs are reported rather than silently truncated.
 - **Privacy.** Everything runs locally. What leaves your computer is what your AI assistant sends to
   its own model: the passages it retrieved.
 
@@ -194,12 +202,22 @@ version.
 | `templates/` | Starting points for new notes |
 | `STANDARDS.md` | How notes are named, filed and tagged |
 | `brain.toml` | Settings |
-| `rag/` | The search: it cuts notes into passages, embeds them and stores them in `.rag/` |
+| `rag/git.py` | Local branch state, raw committed-file reads, and paths to index or remove |
+| `rag/index/` | Markdown chunking, embeddings, database operations, synchronization, and search |
+| `rag/mcp/server.py` | Four tools exposing search, whole-note reads, standards, and templates |
+| `rag/config.py`, `rag/cli.py` | Settings and terminal commands |
 | `setup.sh`, `doctor.sh`, `.githooks/` | Install, check, and the hooks that update search after a pull |
 | `AGENTS.md`, `.github/copilot-instructions.md` | Instructions for AI assistants working in this repository |
 | `PLAN.md` | What is done and what is next, with the decisions and measurements |
 
 `.rag/` is your own local index. It can always be rebuilt from the notes and is never committed.
+
+CLI and MCP requests explicitly call `indexer.prepare_index` before retrieval. It updates only
+when needed and holds the index lock until retrieval finishes. Opening an existing database or
+checking status never rebuilds it; synchronization handles incompatible caches explicitly.
+`search.py` only searches the supplied database; it does not read Git or synchronize anything.
+The CLI lives in one file. Its command handlers import engine dependencies only when executed,
+so help does not initialize the database or ML libraries.
 
 ## For developers
 

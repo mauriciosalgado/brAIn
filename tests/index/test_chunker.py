@@ -3,11 +3,13 @@ Markdown (a catalogue of awkward notes and random mixes of them)."""
 
 import random
 import re
+from collections import Counter
 
 import pytest
+from markdown_it import MarkdownIt
 
 from rag.config import MAX_CHUNK_SIZE
-from rag.notes.chunker import chunk_markdown
+from rag.index.chunker import chunk_markdown
 
 WORDS = "word " * 70  # about 350 characters
 PARAGRAPHS = "\n\n".join(f"Paragraph {i}. " + "word " * 50 for i in range(30))
@@ -98,6 +100,10 @@ def test_text_before_the_first_heading_is_kept():
 def test_empty_and_tiny_notes():
     assert chunks("") == [] and chunks("\n\n") == [] and chunks(" \n\t\n") == []
     assert chunks("# Only a title") == []
+    assert chunks("Only a title\n============\n") == []
+    assert chunks("line one\nline two\n--------\n") == []
+    assert chunks("# Only\u2028a title") == []
+    assert chunks("Only\u2028a title\n============\n") == []
     assert chunks("# A\n\n## B\n\n### C\n") == []
     tiny = chunks("# Tiny\n\nA short note.\n")
     assert len(tiny) == 1 and "short note" in tiny[0].text
@@ -180,6 +186,13 @@ def test_unbreakable_long_text_is_cut():
         assert len(result) > 1 and all(len(c.text) <= MAX_CHUNK_SIZE for c in result)
 
 
+def test_splitting_keeps_repeated_words_in_order():
+    body = "alpha beta alpha gamma " * 300
+    result = chunks("# Title\n\n## Body\n\n" + body)
+    returned = "\n".join(chunk.text for chunk in result).replace("## Body", "")
+    assert returned.split() == body.split()
+
+
 def test_very_long_headings_are_not_repeated_but_still_fit():
     result = chunks("word " * 400 + "\nSetext\n======\n\n" + "word " * 300)
     assert all(len(c.text) <= MAX_CHUNK_SIZE for c in result)
@@ -243,17 +256,20 @@ def assert_no_text_lost(source: str, chunked: str) -> None:
         source,
         flags=re.DOTALL,
     )
-    body = re.sub(
-        r"^ {0,3}#{1,6}(?:\s.*)?$", "", body, flags=re.MULTILINE
-    )  # carried by header_path (as is a setext heading's text, which the path is searched for)
-    body = re.sub(r"^[=\-]+\s*$", "", body, flags=re.MULTILINE)
-    kept, flat = set(re.findall(r"\S+", chunked)), re.sub(r"\s+", "", chunked)
-    kept |= {bare(word) for word in kept}
-    for word in set(re.findall(r"\S+", body)):
+    lines = body.split("\n")
+    for token in MarkdownIt("commonmark").parse(body):
+        if token.type == "heading_open" and not token.level and token.map:
+            start, end = token.map
+            lines[start:end] = [""] * (end - start)  # headings are metadata, not body content
+    body = "\n".join(lines)
+    words = re.findall(r"\S+", chunked)
+    kept, normalized = Counter(words), Counter(bare(word) for word in words)
+    flat = re.sub(r"\s+", "", chunked)
+    for word, count in Counter(re.findall(r"\S+", body)).items():
         if not bare(word) or re.fullmatch(r"[=\-]+", word):  # only syntax: rules, fence markers
             continue
         if len(word) <= 200:
-            assert word in kept or bare(word) in kept, f"lost {word[:40]!r}"
+            assert max(kept[word], normalized[bare(word)]) >= count, f"lost {word[:40]!r}"
         else:  # very long words may be cut, so check their ends
             squeezed = re.sub(r"\s+", "", word)
             assert squeezed[:50] in flat and squeezed[-50:] in flat, f"lost {word[:40]!r}"

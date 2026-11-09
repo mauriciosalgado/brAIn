@@ -18,7 +18,8 @@ Rules for writing notes that the standard does not cover:
 - **No secrets** in notes. Keep runbooks generic: no hardcoded paths, accounts or hosts.
 - **Create notes on a new branch**, not on the main branch, and leave committing and merging to the
   user unless they ask you to.
-- **Only the main branch is indexed.** Do not run `rag sync` to make a draft appear.
+- **Only the configured branch is indexed** (`main` by default). Do not run `rag sync` to make a
+  draft appear.
 
 ## Working on the code
 
@@ -35,19 +36,30 @@ uv run ty check rag   # types
 
 | Path | What it is |
 |------|------------|
-| `rag/notes/` | Getting text out of the repository: `git.py` (plain git: branch tip, changes, file contents), `vault.py` (which files are notes, and their text on the searched branch), `chunker.py` (note to passages) |
-| `rag/index/` | The searchable index: `embeddings.py` (text to vectors), `store.py` (the LanceDB table), `indexer.py` (keeps it in line with git), `search.py` (question to passages) |
-| `rag/` | `config.py` (settings), `cli.py` (the `rag` command), `mcp/server.py` (the tools for agents) |
-| `brain.toml` | Settings the user may change. Read at run time. |
+| `rag/git.py` | Local branch state, note-change plans, and raw committed-file bytes. No database operations or whole-note tool. |
+| `rag/index/` | `chunker.py` (Markdown to passages), `embeddings.py` (text to vectors), `store.py` (LanceDB operations), `indexer.py` (updates and prepares the index), `search.py` (retrieves passages from a supplied database) |
+| `rag/` | `config.py` (settings), `cli.py` (terminal commands), `mcp/server.py` (the tools for agents) |
+| `brain.toml` | Settings the user may change. Loaded when a process starts. |
 | `STANDARDS.md`, `templates/` | How notes are written. Served to agents by the tools. |
 | `setup.sh`, `doctor.sh`, `.githooks/` | Install, check, and the hooks that sync the index after a pull |
 | `tests/` | Tests, laid out like `rag/`. `tests/fixtures/` holds sample notes used to test the chunker. |
 
 Conventions:
 
-- A setting a user might change goes in `brain.toml`: add it to `_DEFAULTS` in
+- A setting a user might change goes in `brain.toml`: add it to `Settings` in
   `rag/config.py` with a validation rule and a test. Anything else lives in `rag/config.py`.
-- Notes are read from the main branch's commit with git, never from the working tree.
+- Notes are read from the configured branch's local commit with git, never from the working tree.
+- Keep Git planning independent of the database; pass commits and known paths, not store handles.
+- Search only reads its supplied database. CLI/MCP explicitly prepare it through
+  `indexer.prepare_index`, which synchronizes if needed and holds the lock through retrieval.
+- Opening an existing store must not rebuild it. Only synchronization rebuilds incompatible
+  caches and clears the commit marker before changing notes.
+- The MCP `read_note` tool validates note paths and decodes Git's raw committed-file bytes.
+- Sync hooks are required. Setup enables `.githooks`; doctor checks them. Hooks sync after a
+  pull, merge or rebase, without fetching or pulling themselves.
+- Keep imports at module level, except heavy CLI dependencies: import those inside command
+  handlers so help stays lightweight. Keep the CLI in one file with explicit command dispatch;
+  pass ordinary values to handlers, not argparse objects.
 - Keep the code simple and write only what the project needs. Add no workaround for a situation it
   does not have.
 - Never commit `.rag/` (the local index).

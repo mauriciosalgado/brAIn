@@ -25,18 +25,18 @@ model_works() {
 
 # The branch the index follows (main, or BRAIN_BRANCH) must exist and have commits.
 index_branch() {
-  uv run --no-sync python -c "from rag.notes import vault; vault.branch_tip()"
+  uv run --no-sync python -c "from rag import config, git; git.branch_tip(config.BRANCH)"
 }
 
 # Hooks only run when git is pointed at .githooks and the scripts are executable.
 hooks_enabled() {
-  [ "$(git config --local core.hooksPath)" = .githooks ] || return 1
+  [ "$(git config --get core.hooksPath)" = .githooks ] || return 1
   for hook in sync-notes post-merge post-rewrite; do
     [ -x ".githooks/$hook" ] || return 1
   done
 }
 
-check "git installed" "https://git-scm.com/" command -v git
+check "git 2.42+ installed" "https://git-scm.com/; run from a Git clone" git cat-file --batch -Z </dev/null
 check "uv installed" "https://docs.astral.sh/uv/getting-started/installation/" command -v uv
 check "dependencies match uv.lock" "run ./setup.sh" uv sync --check
 check "brain.toml is valid" "run: uv run rag status, and fix what it says" uv run --no-sync python -c "import rag.config"

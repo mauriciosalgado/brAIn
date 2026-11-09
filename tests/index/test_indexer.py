@@ -1,17 +1,18 @@
 import hashlib
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
 
 import pytest
+from filelock import FileLock, Timeout
 from samples import AWS, CAKE, numbered
 
-from rag import config
-from rag.index import embeddings, indexer, search, store
+from rag import config, git
+from rag.index import chunker, embeddings, indexer, search, store
+from rag.index.chunker import Chunk
 from rag.index.store import EmbeddedNote, Store, write_lock
-from rag.notes import chunker, git
-from rag.notes import vault as notes
-from rag.notes.chunker import Chunk
 
 PER_NOTE = len(chunker.chunk_markdown(AWS, "notes/x.md"))
 
@@ -62,7 +63,8 @@ def test_a_second_sync_reads_nothing(vault, commit, monkeypatch):
     (vault / "aws-keys.md").write_text(AWS)
     commit()
     indexer.sync()
-    monkeypatch.setattr(notes, "read_notes", lambda _c, paths: pytest.fail("read") if paths else [])
+    monkeypatch.setattr(git, "read_files", lambda _c, paths: pytest.fail("read") if paths else [])
+    monkeypatch.setattr(Store, "sources", lambda _self: pytest.fail("scan"))
     assert indexer.sync() == indexer.SyncStats()
 
 
@@ -77,7 +79,9 @@ def test_a_rename_removes_the_old_path_and_adds_the_new_one(vault, commit, vault
     assert sources() == {"notes/aws-credentials.md"}
 
 
-@pytest.mark.parametrize("name", ["it's a note.md", "café notes.md", "-dash.md", 'say "hi".md'])
+@pytest.mark.parametrize(
+    "name", ["it's a note.md", "café notes.md", "-dash.md", 'say "hi".md', "line\nbreak.md"]
+)
 def test_unusual_file_names_are_indexed_and_removed(vault, commit, vault_git, name):
     (vault / name).write_text(AWS)
     commit()
@@ -94,7 +98,7 @@ def test_only_committed_notes_are_indexed(vault, commit):
     (vault / "aws-keys.md").write_text(AWS.replace("ninety", "sixty"))  # edited, not committed
     (vault / "cake.md").write_text(CAKE)  # new, not committed
     assert indexer.sync() == indexer.SyncStats()
-    assert "ninety" in search.query("how often to rotate keys")[0]["text"]
+    assert "ninety" in search.query("how often to rotate keys", Store())[0]["text"]
 
 
 def test_the_index_follows_the_branch_whatever_is_checked_out(vault, commit, vault_git):
@@ -147,6 +151,7 @@ def test_notes_that_cannot_be_indexed_are_reported_and_leave_nothing_behind(vaul
     indexer.sync()
     (vault / "empty.md").write_text("")
     (vault / "title-only.md").write_text("# Just a title\n")
+    (vault / "setext-title.md").write_text("Just a title\n============\n")
     (vault / "bad.md").write_bytes(b"# Bad\n\nbroken \xff\xfe bytes " * 5)
     (vault / "stays-then-empties.md").write_text("")
     commit()
@@ -154,6 +159,7 @@ def test_notes_that_cannot_be_indexed_are_reported_and_leave_nothing_behind(vaul
     assert set(stats.failed) == {
         "notes/empty.md",
         "notes/title-only.md",
+        "notes/setext-title.md",
         "notes/bad.md",
         "notes/stays-then-empties.md",
     }
@@ -171,12 +177,13 @@ def test_a_utf8_bom_is_ignored(vault, commit):
     (vault / "aws-keys.md").write_bytes(b"\xef\xbb\xbf" + AWS.encode())
     commit()
     indexer.sync()
-    assert search.query("rotate keys")[0]["header_path"] == "AWS Keys > Rotation"
+    assert search.query("rotate keys", Store())[0]["header_path"] == "AWS Keys > Rotation"
 
 
 def test_a_sync_interrupted_while_embedding_is_repeated_without_duplicates(
     vault, commit, monkeypatch
 ):
+    monkeypatch.setattr(config, "WRITE_BATCH_CHUNKS", 1)
     for i in range(3):
         (vault / f"note-{i}.md").write_text(numbered(i))
     commit()
@@ -197,6 +204,47 @@ def test_a_sync_interrupted_while_embedding_is_repeated_without_duplicates(
     assert len(sources()) == 3 and Store().count() == 3 * PER_NOTE
 
 
+def test_a_partial_sync_cannot_look_current_after_the_branch_moves_back(
+    vault, commit, vault_git, monkeypatch
+):
+    (vault / "a.md").write_text(AWS)
+    (vault / "b.md").write_text(CAKE)
+    previous = commit()
+    indexer.sync()
+    (vault / "a.md").write_text(AWS.replace("ninety", "sixty"))
+    (vault / "b.md").write_text(CAKE.replace("forty", "fifty"))
+    commit()
+    monkeypatch.setattr(config, "WRITE_BATCH_CHUNKS", 1)
+    real, calls = embeddings.embed_documents, []
+
+    def interrupted(texts):
+        calls.append(1)
+        if len(calls) == 2:
+            raise OSError("disk full")
+        return real(texts)
+
+    monkeypatch.setattr(embeddings, "embed_documents", interrupted)
+    with pytest.raises(OSError, match="disk full"):
+        indexer.sync()
+    assert Store().indexed_commit() is None
+    assert "sixty" in search.query("rotate keys", Store())[0]["text"]
+    vault_git("update-ref", "refs/heads/main", previous)
+    monkeypatch.setattr(embeddings, "embed_documents", real)
+    with indexer.prepare_index() as index:
+        assert index.indexed_commit() == previous
+        assert "ninety" in search.query("rotate keys", index)[0]["text"]
+        assert "forty" in search.query("bake cake", index)[0]["text"]
+
+
+def test_automatic_preparation_reports_rejected_notes(vault, commit, caplog):
+    (vault / "good.md").write_text(AWS)
+    (vault / "bad.md").write_bytes(b"not UTF-8: \xff")
+    head = commit()
+    with indexer.prepare_index() as index:
+        assert index.sources() == {"notes/good.md"} and index.indexed_commit() == head
+    assert "skipped notes/bad.md" in caplog.text
+
+
 def test_changed_settings_rebuild_the_index(vault, commit, monkeypatch, embedded):
     (vault / "aws-keys.md").write_text(AWS)
     commit()
@@ -211,6 +259,7 @@ def test_the_fingerprint_covers_the_settings_and_the_chunker_code():
     settings = (
         config.MODEL,
         config.EMBEDDING_SIZE,
+        config.MODEL_MAX_TOKENS,
         config.MAX_CHUNK_SIZE,
         config.MIN_CHUNK_SIZE,
         tuple(config.SKIP_HEADINGS),
@@ -228,7 +277,90 @@ def test_a_replacement_that_fails_keeps_the_old_note(vault, commit):
     broken = EmbeddedNote("notes/aws-keys.md", [chunk, chunk], [[0.0] * config.EMBEDDING_SIZE])
     with pytest.raises(ValueError):  # two chunks, one vector
         Store().replace_notes([broken])
-    assert "Rotate AWS" in search.query("rotate keys")[0]["text"]
+    assert "Rotate AWS" in search.query("rotate keys", Store())[0]["text"]
+
+
+def test_preparation_refreshes_commits_and_holds_the_lock_through_retrieval(vault, commit):
+    (vault / "cake.md").write_text(CAKE)
+    commit()
+    indexer.sync()
+    (vault / "cake.md").write_text(CAKE.replace("forty", "fifty"))
+    head = commit()
+
+    def lock_available():
+        code = (
+            "import sys\n"
+            "from filelock import FileLock, Timeout\n"
+            "try:\n"
+            "    with FileLock(sys.argv[1]).acquire(timeout=0.05): print('free')\n"
+            "except Timeout: print('busy')\n"
+        )
+        result = subprocess.run(
+            [sys.executable, "-c", code, str(config.LOCK_PATH)],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5,
+        )
+        return result.stdout.strip() == "free"
+
+    with indexer.prepare_index() as index:
+        assert index.indexed_commit() == head and not lock_available()
+        assert "fifty" in search.query("how long do I bake the cake", index)[0]["text"]
+    assert lock_available()
+
+
+def test_preparation_uses_the_configured_branch_not_the_checked_out_one(vault, commit, vault_git):
+    (vault / "cake.md").write_text(CAKE)
+    main = commit()
+    vault_git("checkout", "-q", "-b", "feature/edit")
+    (vault / "cake.md").write_text(CAKE.replace("forty", "fifty"))
+    commit()
+    with indexer.prepare_index() as index:
+        assert index.indexed_commit() == main
+        assert "forty" in search.query("how long do I bake the cake", index)[0]["text"]
+
+
+def test_preparing_a_current_index_does_not_write_it_again(vault, commit):
+    (vault / "aws-keys.md").write_text(AWS)
+    commit()
+    with indexer.prepare_index() as index:
+        version = index._table.version
+        marker_inode = (config.DB_DIR / "indexed").stat().st_ino
+    with indexer.prepare_index() as index:
+        assert index._table.version == version
+        assert (config.DB_DIR / "indexed").stat().st_ino == marker_inode
+
+
+def test_status_reads_the_database_under_the_lock(vault, commit, monkeypatch):
+    commit()
+
+    def open_store():
+        with pytest.raises(Timeout), FileLock(config.LOCK_PATH).acquire(timeout=0):
+            pass
+        return Store()
+
+    monkeypatch.setattr(indexer, "Store", open_store)
+    indexer.status()
+
+
+def test_status_does_not_rebuild_an_incompatible_index(vault, commit, monkeypatch):
+    (vault / "aws-keys.md").write_text(AWS)
+    commit()
+    indexer.sync()
+    marker = (config.DB_DIR / "indexed").read_bytes()
+    chunks = Store().count()
+    version = Store()._table.version
+    monkeypatch.setattr(store, "FINGERPRINT", "changed settings")
+    status = indexer.status()
+    assert (status.notes, status.chunks, status.pending, status.indexed_commit) == (
+        1,
+        chunks,
+        1,
+        None,
+    )
+    assert Store()._table.version == version
+    assert (config.DB_DIR / "indexed").read_bytes() == marker
 
 
 def test_status_compares_the_index_with_git(vault, commit, vault_git):

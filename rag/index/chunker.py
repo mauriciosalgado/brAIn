@@ -21,7 +21,6 @@ _PARSER = MarkdownIt("commonmark")
 _FRONTMATTER = re.compile(
     r"\A---[ \t]*\n(?=[^\n]*:|[ \t]*#).*?\n(?:---|\.\.\.)[ \t]*(?:\n|\Z)", re.DOTALL
 )
-_ATX_HEADING = re.compile(r" {0,3}#{1,6}(?:\s|$)")
 _SKIPPED_HEADINGS = {heading.lower() for heading in SKIP_HEADINGS}
 _BREAKS = ("\n\n", "\n", " ")  # where a long text may be cut, best first
 _LONGEST_PATH_NAME = 100  # a setext "heading" can be a whole paragraph
@@ -192,10 +191,12 @@ def _trim(text: str) -> str:
 
 
 def _content_length(text: str) -> int:
-    """The length of the text without its `#` heading line and its whitespace."""
-    lines = _trim(text).splitlines()
-    if lines and _ATX_HEADING.match(lines[0]):
-        lines = lines[1:]
+    """The content length without a leading Markdown heading or whitespace."""
+    text = _trim(text)
+    lines = text.split("\n")
+    tokens = _PARSER.parse(text.split("\n\n", 1)[0])
+    if tokens and tokens[0].type == "heading_open" and tokens[0].map:
+        lines = lines[tokens[0].map[1] :]
     return len("".join(lines).strip())
 
 

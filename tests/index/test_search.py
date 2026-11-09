@@ -1,11 +1,9 @@
-import threading
-import time
-
 import pytest
 from samples import AWS, CAKE, numbered
 
-from rag.index import indexer, search
-from rag.index.store import write_lock
+from rag import git
+from rag.index import embeddings, indexer, search
+from rag.index.store import Store
 
 
 def hit(source, score):
@@ -30,56 +28,44 @@ def test_the_best_match_comes_first_with_its_section_and_score(vault, commit):
     (vault / "aws-keys.md").write_text(AWS)
     (vault / "cake.md").write_text(CAKE)
     commit()
-    hits = search.query("how often should we rotate credentials")
+    indexer.sync()
+    hits = search.query("how often should we rotate credentials", Store())
     assert [h["source"] for h in hits] == ["notes/aws-keys.md"]
     assert hits[0]["header_path"] == "AWS Keys > Rotation"
     assert set(hits[0]) == {"text", "source", "header_path", "score"}
 
 
-def test_a_query_sees_commits_made_since_the_last_sync(vault, commit):
+def test_search_reads_the_supplied_database_without_checking_or_updating_git(
+    vault, commit, monkeypatch
+):
     (vault / "cake.md").write_text(CAKE)
-    commit()
-    assert "forty" in search.query("how long do I bake the cake")[0]["text"]
+    indexed = commit()
+    indexer.sync()
+    store = Store()
     (vault / "cake.md").write_text(CAKE.replace("forty", "fifty"))
     commit()
-    assert "fifty" in search.query("how long do I bake the cake")[0]["text"]
 
+    def unexpected(*_):
+        pytest.fail("Retrieval must not check Git or synchronize the index")
 
-def test_a_query_reads_the_branch_not_the_checked_out_one(vault, commit, vault_git):
-    (vault / "cake.md").write_text(CAKE)
-    commit()
-    vault_git("checkout", "-q", "-b", "feature/edit")
-    (vault / "cake.md").write_text(CAKE.replace("forty", "fifty"))
-    commit()
-    assert "forty" in search.query("how long do I bake the cake")[0]["text"]
+    monkeypatch.setattr(git, "branch_tip", unexpected)
+    monkeypatch.setattr(indexer, "sync", unexpected)
+    hits = search.query("how long do I bake the cake", store)
+    assert "forty" in hits[0]["text"] and "fifty" not in hits[0]["text"]
+    assert store.indexed_commit() == indexed
 
 
 def test_a_query_returns_at_most_max_results(vault, commit):
     for i in range(6):
         (vault / f"aws-{i}.md").write_text(numbered(i))
     commit()
-    assert len(search.query("how often to rotate keys", max_results=3)) == 3
+    indexer.sync()
+    assert len(search.query("how often to rotate keys", Store(), max_results=3)) == 3
 
 
-def test_a_query_without_notes_explains_the_problem(vault, commit):
-    commit()
-    with pytest.raises(ValueError, match="No notes"):
-        search.query("anything")
-
-
-def test_a_query_waits_for_a_running_sync(vault, commit):
-    (vault / "aws-keys.md").write_text(AWS)
+def test_a_query_without_notes_does_not_load_the_model(vault, commit, monkeypatch):
     commit()
     indexer.sync()
-    (vault / "cake.md").write_text(CAKE)
-    commit()
-    holding = threading.Event()
-
-    def other_process():
-        with write_lock():
-            holding.set()
-            time.sleep(0.5)
-
-    threading.Thread(target=other_process).start()
-    holding.wait()
-    assert search.query("bake a cake")[0]["source"] == "notes/cake.md"
+    monkeypatch.setattr(embeddings, "embed_query", lambda _: pytest.fail("loaded model"))
+    with pytest.raises(ValueError, match="No notes"):
+        search.query("anything", Store())

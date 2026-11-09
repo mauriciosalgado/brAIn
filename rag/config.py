@@ -84,6 +84,8 @@ MODEL_FILES: list[str] = [
     "special_tokens_map.json",
 ]
 EMBEDDING_SIZE: int = 768
+# The context includes section paths and special tokens.
+MODEL_MAX_TOKENS: int = 8192
 MODEL_CACHE_DIR: str = str(RAG_DIR / "models")
 EMBED_BATCH_SIZE: int = 8  # fastembed's default of 256 needs about 10 GB of memory
 QUERY_PREFIX: str = "query: "  # the model wants it on questions, not on notes

@@ -33,6 +33,14 @@ def fake_uv(directory: Path, log: Path, behaviour: str = "") -> str:
     return f"{directory}:{SYSTEM_PATH}"
 
 
+def fake_old_git(directory: Path) -> None:
+    executable = directory / "git"
+    executable.write_text(
+        '#!/bin/sh\nif [ "$1" = cat-file ]; then exit 129; fi\nexec /usr/bin/git "$@"\n'
+    )
+    executable.chmod(0o755)
+
+
 def run(script: Path, *args: str, path: str = SYSTEM_PATH, home: Path | None = None):
     return subprocess.run(
         [str(script), *args],
@@ -45,7 +53,7 @@ def run(script: Path, *args: str, path: str = SYSTEM_PATH, home: Path | None = N
 
 
 def git(repo: Path, *args: str) -> str:
-    result = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=False)
+    result = subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, check=True)
     return result.stdout.strip()
 
 
@@ -79,11 +87,18 @@ def test_setup_can_be_run_again(clone, tmp_path):
     assert git(clone, "config", "--local", "core.hooksPath") == ".githooks"
 
 
-def test_setup_does_not_override_another_hooks_path(clone, tmp_path):
-    git(clone, "config", "--local", "core.hooksPath", "my-hooks")
+@pytest.mark.parametrize("scope", ["local", "global"])
+def test_setup_enables_required_hooks_even_when_another_path_is_configured(clone, tmp_path, scope):
+    if scope == "local":
+        git(clone, "config", "--local", "core.hooksPath", "my-hooks")
+    else:
+        (clone / ".gitconfig").write_text("[core]\n\thooksPath = my-hooks\n")
     result = run(clone / "setup.sh", path=fake_uv(tmp_path / "bin", tmp_path / "uv.log"))
-    assert git(clone, "config", "--local", "core.hooksPath") == "my-hooks"
-    assert "left alone" in result.stdout
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert git(clone, "config", "--local", "core.hooksPath") == ".githooks"
+    assert "Replacing core.hooksPath 'my-hooks'" in result.stdout
+    assert "other hooks will no longer run" in result.stdout
+    assert "All good" in result.stdout
 
 
 def test_setup_stops_when_a_step_fails(clone, tmp_path):
@@ -99,6 +114,15 @@ def test_setup_stops_when_a_step_fails(clone, tmp_path):
 def test_setup_without_uv_explains_how_to_get_it(clone):
     result = run(clone / "setup.sh")
     assert result.returncode == 1 and "✗ missing: uv" in result.stdout
+
+
+def test_setup_stops_before_installing_when_git_lacks_required_batch_support(clone, tmp_path):
+    log = tmp_path / "uv.log"
+    path = fake_uv(tmp_path / "bin", log)
+    fake_old_git(tmp_path / "bin")
+    result = run(clone / "setup.sh", path=path)
+    assert result.returncode == 1 and "Git 2.42+" in result.stdout
+    assert not log.exists()
 
 
 def test_setup_outside_a_git_clone_fails(tmp_path):
@@ -126,11 +150,24 @@ def test_doctor_reports_everything_wrong_on_a_fresh_clone(clone):
         "✗ git hooks enabled",
     ):
         assert problem in result.stdout
-    assert "✓ git installed" in result.stdout and "Fix the issues above" in result.stdout
+    assert "✓ git 2.42+ installed" in result.stdout and "Fix the issues above" in result.stdout
 
 
-def test_doctor_is_happy_when_everything_is_in_place(clone, tmp_path):
+def test_doctor_reports_unsupported_git_without_stopping_other_checks(clone, tmp_path):
     healthy_clone(clone)
+    path = fake_uv(tmp_path / "bin", tmp_path / "uv.log")
+    fake_old_git(tmp_path / "bin")
+    result = run(clone / "doctor.sh", path=path)
+    assert result.returncode == 1 and "✗ git 2.42+ installed" in result.stdout
+    assert result.stdout.count("✗") == 1 and result.stdout.count("✓") == 8
+
+
+@pytest.mark.parametrize("scope", ["local", "global"])
+def test_doctor_is_happy_when_everything_is_in_place(clone, tmp_path, scope):
+    if scope == "local":
+        healthy_clone(clone)
+    else:
+        (clone / ".gitconfig").write_text("[core]\n\thooksPath = .githooks\n")
     result = run(clone / "doctor.sh", path=fake_uv(tmp_path / "bin", tmp_path / "uv.log"))
     assert result.returncode == 0, result.stdout
     assert (
@@ -172,6 +209,43 @@ def test_doctor_flags_hooks_that_git_would_not_run(clone, tmp_path, broken):
 
 
 # ---- the hooks themselves -------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("update", ["merge", "rebase"])
+def test_git_updates_trigger_sync_without_a_client(clone, tmp_path, update):
+    log = tmp_path / "uv.log"
+    path = fake_uv(tmp_path / "bin", log)
+    result = run(clone / "setup.sh", path=path)
+    assert result.returncode == 0, result.stdout + result.stderr
+    log.unlink()
+    git(clone, "config", "user.name", "Test")
+    git(clone, "config", "user.email", "test@example.com")
+    git(clone, "config", "commit.gpgsign", "false")
+    git(clone, "add", ".")
+    git(clone, "commit", "-q", "-m", "baseline")
+    branch = git(clone, "branch", "--show-current")
+    git(clone, "checkout", "-q", "-b", "incoming")
+    (clone / "notes").mkdir()
+    (clone / "notes" / "new.md").write_text("# New note\n\nPulled content.\n")
+    git(clone, "add", "notes")
+    git(clone, "commit", "-q", "-m", "new note")
+    git(clone, "checkout", "-q", branch)
+    if update == "rebase":
+        (clone / "local.txt").write_text("local change\n")
+        git(clone, "add", "local.txt")
+        git(clone, "commit", "-q", "-m", "local change")
+    assert not log.exists()
+    subprocess.run(
+        ["git", update, "incoming"],
+        cwd=clone,
+        env={"PATH": path, "HOME": str(clone)},
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    wait_for(log)
+    assert log.read_text().strip() == f"{clone.resolve()}: run rag sync"
+    assert (clone / "notes" / "new.md").read_text() == "# New note\n\nPulled content.\n"
 
 
 def run_hook(clone: Path, name: str, path: str, home: Path, *args: str, cwd: Path | None = None):

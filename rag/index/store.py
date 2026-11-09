@@ -1,8 +1,7 @@
 """The local index: a LanceDB table on disk, one per developer, rebuilt from the notes.
 
-The table holds every chunk with its vector. Next to it, a small marker file records the settings
-the index was built with and the git commit it matches. The commit is written last, so an
-interrupted sync is simply repeated.
+The table holds passages and vectors. A marker records the settings and indexed commit.
+Opening an existing table never rebuilds it; synchronization explicitly handles rebuilding.
 """
 
 import hashlib
@@ -12,13 +11,13 @@ from datetime import timedelta
 from pathlib import Path
 from typing import NamedTuple
 
-import lancedb
 import pyarrow as pa
 from filelock import FileLock
+from lancedb.db import LanceDBConnection
 from lancedb.index import IvfHnswSq
 
 from rag import config
-from rag.notes import chunker
+from rag.index import chunker
 
 TABLE = "chunks"
 SCHEMA = pa.schema(
@@ -38,6 +37,7 @@ FINGERPRINT = hashlib.sha256(
         (
             config.MODEL,
             config.EMBEDDING_SIZE,
+            config.MODEL_MAX_TOKENS,
             config.MAX_CHUNK_SIZE,
             config.MIN_CHUNK_SIZE,
             tuple(config.SKIP_HEADINGS),
@@ -50,7 +50,7 @@ FINGERPRINT = hashlib.sha256(
 
 @contextmanager
 def write_lock():
-    """Only one process changes the index at a time (LanceDB supports a single writer). Waits."""
+    """Keep updates and prepared readers from mixing table snapshots with newer commit markers."""
     config.RAG_DIR.mkdir(parents=True, exist_ok=True)
     with FileLock(config.LOCK_PATH):
         yield
@@ -71,21 +71,23 @@ def _chunks_of(sources: list[str]) -> str:
 
 
 class Store:
+    """LanceDB passage operations and the marker identifying the indexed commit."""
+
     def __init__(self) -> None:
         config.DB_DIR.mkdir(parents=True, exist_ok=True)
-        self._db = lancedb.connect(config.DB_DIR)
+        self._db = LanceDBConnection(config.DB_DIR)
         self._marker = config.DB_DIR / "indexed"
-        self._table = self._open()
+        if TABLE in self._db.list_tables().tables:
+            self._table = self._db.open_table(TABLE)
+        else:
+            self._table = self._db.create_table(TABLE, schema=SCHEMA)
+            self.set_indexed_commit(None)
 
-    def _open(self):
-        fingerprint, _ = self._read_marker()
-        exists = TABLE in self._db.list_tables().tables
-        if fingerprint != FINGERPRINT or not exists:
-            # Built with other settings, lost, or not set up yet: start afresh.
-            if exists:
-                self._db.drop_table(TABLE)
-            self.set_indexed_commit("")
-        return self._db.create_table(TABLE, schema=SCHEMA, exist_ok=True)
+    def rebuild_if_needed(self) -> None:
+        """Rebuild a cache made with different settings. Only synchronization calls this."""
+        if self._read_marker()[0] != FINGERPRINT:
+            self._table = self._db.create_table(TABLE, schema=SCHEMA, mode="overwrite")
+            self.set_indexed_commit(None)
 
     def _read_marker(self) -> tuple[str, str]:
         """The fingerprint of the settings the index was built with, and the commit it matches."""
@@ -96,13 +98,16 @@ class Store:
         return fingerprint, commit
 
     def indexed_commit(self) -> str | None:
-        """The git commit the index matches, or None if nothing has been indexed yet."""
-        return self._read_marker()[1] or None
+        """The matching commit, or None for an incomplete or incompatible index."""
+        fingerprint, commit = self._read_marker()
+        if fingerprint != FINGERPRINT:
+            return None
+        return commit or None
 
-    def set_indexed_commit(self, commit: str) -> None:
-        """Record the commit the index matches ("" for none), with the current settings."""
+    def set_indexed_commit(self, commit: str | None) -> None:
+        """Record a completed commit, or None before changing indexed notes."""
         temporary = self._marker.with_suffix(f".{os.getpid()}")
-        temporary.write_text(f"{FINGERPRINT}\n{commit}")
+        temporary.write_text(f"{FINGERPRINT}\n{commit or ''}")
         os.replace(temporary, self._marker)  # atomic
 
     def sources(self) -> set[str]:

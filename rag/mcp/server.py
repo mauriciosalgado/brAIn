@@ -1,9 +1,13 @@
+"""Four MCP tools for search, committed-note reads, standards, and templates."""
+
+from pathlib import Path
+from xml.sax.saxutils import quoteattr
+
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
-from rag import config
-from rag.index import search
-from rag.notes import vault
+from rag import config, git
+from rag.index import indexer, search
 
 READ_ONLY = {"readOnlyHint": True, "openWorldHint": False}
 
@@ -18,16 +22,12 @@ mcp = FastMCP(
 )
 
 
-def _attribute(value: str) -> str:
-    return '"' + value.replace('"', "'") + '"'  # a quote cannot end the attribute early
-
-
 def format_passages(hits: list[dict]) -> str:
     """The hits as plain text for a model to read: one tagged block per passage, the chunk as it
     is written in the note (not escaped), best match first."""
     passages = "\n\n".join(
-        f'<passage rank="{rank}" source={_attribute(hit["source"])} '
-        f"section={_attribute(hit['header_path'])}>\n{hit['text']}\n</passage>"
+        f'<passage rank="{rank}" source={quoteattr(hit["source"])} '
+        f"section={quoteattr(hit['header_path'])}>\n{hit['text']}\n</passage>"
         for rank, hit in enumerate(hits, 1)
     )
     noun = "passage" if len(hits) == 1 else "passages"
@@ -55,9 +55,12 @@ def search_notes(query: str, max_results: int = config.MAX_RESULTS) -> str:
         Passages, best match first, each with its note path (`source`) and `section`.
     """
     try:
-        passages = search.query(query, max_results=max(1, min(max_results, config.MAX_RESULTS)))
+        with indexer.prepare_index() as store:
+            passages = search.query(
+                query, store, max_results=max(1, min(max_results, config.MAX_RESULTS))
+            )
         return format_passages(passages)
-    except (ValueError, RuntimeError) as error:  # empty query, no notes, model not available
+    except (OSError, ValueError, RuntimeError) as error:
         raise ToolError(str(error)) from error
 
 
@@ -71,17 +74,22 @@ def read_note(path: str) -> str:
         path: The note's path, as given by search_notes, for example "notes/handbook/keys.md".
     """
     try:
-        return vault.read_note(path)
-    except (ValueError, RuntimeError) as error:  # not a note, or no such branch
+        note_path = Path(path)
+        if note_path.is_relative_to(config.ROOT):
+            path = note_path.relative_to(config.ROOT).as_posix()
+        commit = git.branch_tip(config.BRANCH)
+        if path not in git.list_notes(commit):
+            raise ValueError(f"No note at {path} on {config.BRANCH}. Use a path from search_notes.")
+        ((_, content),) = git.read_files(commit, [path])
+        return content.decode("utf-8-sig", errors="replace")
+    except (OSError, ValueError, RuntimeError) as error:
         raise ToolError(str(error)) from error
 
 
-def _templates() -> dict[str, str]:
+def _templates() -> dict[str, Path]:
     """The templates by name: `templates/runbook-template.md` is `runbook`."""
     folder = config.ROOT / "templates"
-    return {
-        p.name.removesuffix("-template.md"): p.read_text() for p in folder.glob("*-template.md")
-    }
+    return {p.name.removesuffix("-template.md"): p for p in folder.glob("*-template.md")}
 
 
 @mcp.tool(title="Get note standards", output_schema=None, annotations=READ_ONLY)
@@ -117,7 +125,7 @@ def get_note_template(template: str = "note") -> str:
     templates = _templates()
     if template not in templates:
         raise ToolError(f"No template '{template}'. Available: {', '.join(sorted(templates))}")
-    return templates[template]
+    return templates[template].read_text()
 
 
 def main() -> None:

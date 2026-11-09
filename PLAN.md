@@ -8,16 +8,19 @@ Rules: keep it simple · measure before adding · nothing is committed without t
 ## Done
 
 - [x] Note standards, templates, runbooks keep state in `/tmp` (`STANDARDS.md`, `templates/`)
-- [x] Chunker: one chunk per heading (`rag/notes/chunker.py`, 190 lines); long sections are split at paragraph, line or word
+- [x] Chunker: one chunk per heading (`rag/index/chunker.py`); long sections are split at paragraph, line or word
       breaks. Checked on a 70-note team vault + 12 messy notes (`tests/fixtures/`): size limit, no text lost
 - [x] Embedder: arctic-embed-m-v2.0 int8 (multilingual, Apache-2.0, 320 MB, registered as a fastembed custom model), small batches, query prefix, model cached in `.rag/models`, repaired by `rag model`
 - [x] Local index: LanceDB in `.rag/`, exact scan below 50k chunks, IVF-HNSW above
 - [x] Index follows git: what git reports as A / M / D since the last indexed commit is indexed / re-indexed /
-      removed (`rag/notes/git.py`, `rag/notes/vault.py`); one marker (the commit) says if the index is fresh
-- [x] Git flow: `.githooks/` + `setup.sh` + `doctor.sh`; every search also compares the marker with the tip of `main` (17 ms)
+      removed (`rag/git.py` plans; `rag/index/indexer.py` applies); one marker (the commit) says if the index is fresh
+- [x] Git flow: `.githooks/` + `setup.sh` + `doctor.sh`; CLI/MCP prepare the index through
+      `indexer.prepare_index`, then pass the database to retrieval-only `search.query`
 - [x] Notes with no content (empty, title only) or unreadable are reported, never silently skipped
+- [x] Tokenizer uses the model's 8,192-token context; over-limit input is reported before inference,
+      and the context limit is part of the index fingerprint
 - [x] MCP tool `search_notes` (bounded `k`, clear errors) and CLI `rag sync | query | status | model`
-- [x] Proven at 200,000 chunks (5 ms search; 1.8 GB on disk); 20,000 notes: a pull of 15 changed
+- [x] Historical scale measurements: 200,000 chunks (5 ms search; 1.8 GB on disk); 20,000 notes: a pull of 15 changed
       notes syncs in 0.1 s; 273 tests. First index costs about 22 ms per chunk (100k chunks is about 35 min)
 
 ## Next (in order)
@@ -32,7 +35,7 @@ Bugs found in review (confirmed by running them):
 
 Then:
 
-- [ ] Commit the baseline
+- [x] Commit the reviewed and validated simplified baseline
 - [x] `README.md` and `AGENTS.md`: what it is, 3-command setup, MCP config, how to write a note
 - [ ] CI: pytest, ruff, shellcheck on Python 3.11-3.13 (the model must be downloaded first)
 - [ ] `rag eval`: run labelled questions (`tests/fixtures/team-vault/gold.json`, 85 of them) against the index
@@ -74,16 +77,19 @@ Then:
   instructions docs, agents.md and Anthropic's "Writing tools for agents".
 - A batch of notes is replaced in one atomic `merge_insert`: a search sees the old chunks or the new
   ones, never a note with none, and each batch makes one version instead of two.
-- The index is the `main` branch (set `BRAIN_BRANCH` if your team's is called otherwise), whichever
-  branch is checked out: sync, search and status read its tip straight from git. A branch is only for
-  writing and committing notes; your own commits never reach the index until a PR is merged and you
-  update `main`. A rename is a delete + add. Hooks are an optimisation; correctness comes from the
-  marker-vs-`main` check every search does.
+- The index follows the configured local branch (`main` by default), whichever branch is checked
+  out. Commits on that branch are searchable without pushing. A rename is a delete + add.
+  Hooks are required and normally update the index; explicit preparation also handles missed or
+  in-progress updates before CLI/MCP retrieval.
+  It holds the existing index lock through preparation and retrieval so a concurrent update cannot
+  mix table snapshots and commit markers. Search itself only uses the database supplied by its caller.
 - Notes are read from the synced commit (`git cat-file`), never the working tree: a dirty tree or a
   pull in progress cannot leak WIP. A note that fails (empty, too big, not UTF-8) fails the same way
   every time, so it is retried when a commit changes it.
 - One marker file in `.rag/` holds the settings fingerprint and the last indexed commit. Different
-  settings (model, chunk size, the chunker's code) or a lost table rebuild the index from the notes.
+  settings (model, chunk size, the chunker's code) or a lost table rebuild the index during sync,
+  not during inspection. The marker is cleared before changing notes, so interrupted batches
+  cannot claim to match a commit.
 - After pulling code changes, restart the MCP server (restart your AI tool): a process that kept old
   code and a fresh `rag sync` would each rebuild the index in turn (wasteful, never wrong).
 - Queries return every chunk (not note) within `score_margin` (0.10) of the best, up to `max_results` (10); the best is always kept.

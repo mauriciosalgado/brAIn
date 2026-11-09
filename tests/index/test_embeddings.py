@@ -1,12 +1,14 @@
 import math
 from pathlib import Path
 from typing import ClassVar
+from unittest.mock import Mock
 
 import pytest
+from fastembed.text.onnx_embedding import OnnxTextEmbedding
 
 from rag import config
 from rag.index import embeddings
-from rag.notes.chunker import Chunk
+from rag.index.chunker import Chunk
 
 
 @pytest.fixture(scope="module", autouse=True)
@@ -47,12 +49,27 @@ def test_relevant_passage_beats_unrelated():
     assert cosine(query, doc_vectors[0]) > cosine(query, doc_vectors[1])
 
 
+def test_valid_long_passages_do_not_lose_their_endings():
+    common = "Shared context. " * 400
+    first, second = embeddings.embed_documents(
+        [common + "Rotate credentials every ninety days.", common + "Bake cake for forty minutes."]
+    )
+    assert max(abs(a - b) for a, b in zip(first, second, strict=True)) > 1e-6
+
+
+def test_text_beyond_the_model_limit_is_rejected_before_inference(monkeypatch):
+    model = embeddings.get_model()
+    monkeypatch.setattr(model, "embed", lambda *_args, **_kwargs: pytest.fail("inference"))
+    with pytest.raises(ValueError, match="token limit"):
+        embeddings.embed_documents(["token " * config.MODEL_MAX_TOKENS])
+
+
 def test_embedding_text_contains_breadcrumb():
     chunk = Chunk("body text", "Title > Section", 0)
     assert chunk.embedding_text == "Section: Title > Section\n\nbody text"
 
 
-class FakeModel:
+class FakeModel(OnnxTextEmbedding):
     """Stands in for fastembed: it works once its folder holds an `ok` file."""
 
     downloads = 0
@@ -67,6 +84,9 @@ class FakeModel:
             FakeModel.downloads += 1
             self.folder.mkdir(parents=True, exist_ok=True)
             (self.folder / "ok").write_text("model")
+        self.model = self
+        self.tokenizer = Mock()
+        self.tokenizer.encode_batch.return_value = []
 
     def embed(self, texts, **_):
         return ([0.1] * config.EMBEDDING_SIZE for _ in texts)
@@ -98,6 +118,15 @@ def test_ensure_model_replaces_a_damaged_download(fake_model):
     (fake_model / "model.onnx").write_text("")  # a cut-short file, and no `ok`
     embeddings.ensure_model()
     assert FakeModel.downloads == 1 and not (fake_model / "model.onnx").exists()
+
+
+def test_ensure_model_surfaces_cache_cleanup_failures(fake_model, monkeypatch):
+    fake_model.mkdir()
+    denied = Mock(side_effect=PermissionError("cache cleanup denied"))
+    monkeypatch.setattr(embeddings.shutil.os, "open", denied)
+    with pytest.raises(PermissionError, match="cache cleanup denied"):
+        embeddings.ensure_model()
+    assert FakeModel.downloads == 0
 
 
 def test_ensure_model_reports_a_download_that_still_does_not_work(fake_model, monkeypatch):

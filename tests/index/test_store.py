@@ -4,8 +4,8 @@ import pytest
 
 from rag import config
 from rag.index import store
+from rag.index.chunker import Chunk
 from rag.index.store import EmbeddedNote, Store
-from rag.notes.chunker import Chunk
 
 
 def note(source: str, vector_value: float = 0.1, chunks: int = 1) -> EmbeddedNote:
@@ -26,6 +26,20 @@ def test_a_lost_table_forgets_which_commit_it_matched(vault):
     index.set_indexed_commit("abc123")
     index._db.drop_table(store.TABLE)
     assert Store().indexed_commit() is None and Store().count() == 0
+
+
+def test_opening_an_incompatible_index_preserves_it_until_explicit_rebuilding(vault, monkeypatch):
+    index = Store()
+    index.replace_notes([note("notes/a.md")])
+    index.set_indexed_commit("abc123")
+    marker = (config.DB_DIR / "indexed").read_bytes()
+    monkeypatch.setattr(store, "FINGERPRINT", "changed settings")
+    opened = Store()
+    assert opened.count() == 1 and opened.indexed_commit() is None
+    assert (config.DB_DIR / "indexed").read_bytes() == marker
+    opened.rebuild_if_needed()
+    assert opened.count() == 0 and opened.indexed_commit() is None
+    assert (config.DB_DIR / "indexed").read_text().startswith("changed settings")
 
 
 @pytest.mark.parametrize("path", ["notes/it's.md", "notes/x' OR '1'='1.md", "notes/a b ü.md"])

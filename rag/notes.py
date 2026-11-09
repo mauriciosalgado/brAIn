@@ -25,6 +25,7 @@ def read_note(path: str) -> str:
     if not note.is_absolute():
         note = config.ROOT / note
     message = f"No note at {path}. Use a path from search_notes."
+    # Both the requested path and the file it really points to (after symlinks) must be notes.
     if not note.is_relative_to(config.NOTES_DIR) or not is_note(
         note.relative_to(config.ROOT).as_posix()
     ):

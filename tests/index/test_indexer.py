@@ -311,7 +311,7 @@ def test_changed_settings_rebuild_the_index(vault, publish, monkeypatch, embedde
     assert (config.DB_DIR / "indexed").read_text().startswith("other settings")
 
 
-def test_the_fingerprint_covers_the_settings_and_the_chunker_code():
+def test_the_fingerprint_covers_the_settings_and_the_chunking_and_embedding_code():
     settings = (
         config.MODEL,
         config.EMBEDDING_SIZE,
@@ -321,6 +321,7 @@ def test_the_fingerprint_covers_the_settings_and_the_chunker_code():
         tuple(config.SKIP_HEADINGS),
         tuple(config.SKIP_FOLDERS),
         Path(chunker.__file__).read_bytes(),
+        Path(embeddings.__file__).read_bytes(),
     )
     assert hashlib.sha256(repr(settings).encode()).hexdigest() == store.FINGERPRINT
 

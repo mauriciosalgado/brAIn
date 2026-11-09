@@ -1,6 +1,6 @@
 # Standards
 
-This document defines the standards for categorizing and naming notes in this knowledge base. It covers folder structure, file naming conventions, tagging strategy and how a note is laid out. Start new notes from a file in `templates/`.
+This document defines the standards for categorizing and naming notes in this knowledge base. It covers folder structure, file naming conventions, tagging strategy, how a note is laid out and how to write one. Start new notes from a file in `templates/`.
 
 > [!NOTE]
 > All notes should be created in Markdown format and follow the naming and tagging conventions outlined in this document to ensure consistency and ease of navigation across the knowledge base. These are good defaults: adjust the folders and types to suit you, and keep them consistent.
@@ -17,6 +17,7 @@ This document defines the standards for categorizing and naming notes in this kn
   * [Domain vs Tag Strategy](#domain-vs-tag-strategy)
 - [Tags](#tags)
 - [Title and Structure](#title-and-structure)
+- [Writing Notes](#writing-notes)
 - [Scripts & Runbooks](#scripts--runbooks)
 
 <!-- tocstop -->
@@ -141,6 +142,19 @@ The **type** says what kind of note it is (one per note) and matches its folder.
 - A `## Table of Contents` and `Links` are optional for now. A `## References` section goes last.
   Search skips References and Table of Contents, so they add no noise.
 
+## Writing Notes
+
+Notes vary (how-tos, decisions, user stories, plans, diagrams), so these are guidelines, not a format.
+
+- **Say what the note is about.** The title and the short description under it are what a reader sees
+  first, and search shows every passage under its note's title. Replace the template's placeholder
+  text. If the title is only an ID (a ticket), the description must say what it is.
+- **Describe images.** Search reads text only. Next to a diagram or screenshot, write a sentence on what it shows.
+- **Look before writing.** If a note on the topic exists, update it instead of adding a duplicate, and
+  link the related notes.
+- **Never invent facts.** If you are unsure, leave a clear `TODO` for a person.
+- **No secrets** in any note: no passwords, tokens or keys.
+
 ## Scripts & Runbooks
 
 If you use Obsidian with the `execute-code` plugin, notes in `scripts/` can be **runnable** (a ▶
@@ -148,7 +162,7 @@ button on each code block). Define an operation once; anyone can run the vetted 
 re-deriving commands.
 Follow these rules (start from `templates/runbook-template.md`):
 
-- **Share state through a temp file.** Shell blocks are separate processes, so a first **Setup** block writes the run's non-secret config to `/tmp/<note>.env`. Each step block `source`s that file; a final **Cleanup** block removes it. If the file is gone (the OS clears `/tmp` every few days), re-run **Setup**.
+- **Share state through a temp file.** Shell blocks are separate processes, so a first **Setup** block writes the run's non-secret config (accounts, hosts, names) to `/tmp/<note>.env`. Each step block `source`s that file; a final **Cleanup** block removes it. If the file is gone (the OS clears `/tmp` every few days), re-run **Setup**.
 - **Never store secrets** in the note or the env file. Read them at run time from the environment or a secret tool (`aws sso login`, `~/.pgpass`, OS keychain).
 - **Portable paths** via magic commands (`@vault_path`, `@note_path`) — never hardcoded absolute paths.
-- **PATH append.** `execute-code` runs with Obsidian's launch PATH, which on macOS omits Homebrew dirs — so `aws`, `psql`, etc. may be "not found". The runbook template prepends `/opt/homebrew/bin:/usr/local/bin` in the Setup block to fix this portably.
+- **PATH.** `execute-code` runs with Obsidian's launch PATH, which on macOS omits Homebrew dirs — so `aws`, `psql`, etc. may be "not found". Add Homebrew to it in the Setup block: the runbook template uses `brew shellenv`; prepending `/opt/homebrew/bin:/usr/local/bin` to `PATH` works too.

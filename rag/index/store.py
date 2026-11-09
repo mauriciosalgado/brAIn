@@ -18,7 +18,7 @@ from filelock import BaseFileLock, FileLock, Timeout
 from lancedb.query import LanceVectorQueryBuilder
 
 from rag import config
-from rag.index import chunker
+from rag.index import chunker, embeddings
 
 TABLE = "chunks"
 SCHEMA = pa.schema(
@@ -33,7 +33,9 @@ SCHEMA = pa.schema(
 _INDEX_UNAVAILABLE = "No usable search index. Run 'uv run rag sync' first."
 _SYNC_RUNNING = "The index is being synchronized. Try again in a moment."
 
-# Everything that decides what is stored. When it changes, the index is rebuilt from the notes.
+# Everything that decides what is stored: the settings and the code that cuts notes into passages
+# and turns them into vectors. Code is shared with the team, so a pull that changes it must rebuild
+# every index. When this changes, the index is rebuilt from the notes.
 FINGERPRINT = hashlib.sha256(
     repr(
         (
@@ -45,6 +47,7 @@ FINGERPRINT = hashlib.sha256(
             tuple(config.SKIP_HEADINGS),
             tuple(config.SKIP_FOLDERS),
             Path(chunker.__file__).read_bytes(),
+            Path(embeddings.__file__).read_bytes(),
         )
     ).encode()
 ).hexdigest()

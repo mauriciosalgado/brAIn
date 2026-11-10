@@ -178,23 +178,25 @@ def _split(text: str, limit: int, breaks: tuple[str, ...] = _BREAKS) -> list[str
 
 
 def _merge_tiny(pieces: list[Piece]) -> list[Piece]:
-    """Join a tiny piece to the piece before it, or, for a tiny start (often a title and a line of
-    tags), to the piece after, while the result still fits. A piece of a long section is only
-    joined within its own section, so a chunk never sits under the wrong heading path."""
-    merged: list[Piece] = []
+    """Give every tiny piece a home: the piece before it, else the piece after it (a note often
+    starts with a title and a line of tags), else its own passage. The joined passage keeps the
+    neighbour's heading path."""
+    passages: list[Piece] = []
     for piece in pieces:
-        if len(merged) == 1 and _is_tiny(merged[0].text) and _fits(merged[0].text, piece.text):
-            merged[0] = piece._replace(text=merged[0].text + "\n\n" + piece.text)
-        elif (
-            merged
-            and _is_tiny(piece.text)
-            and _fits(merged[-1].text, piece.text)
-            and (piece.whole_section or merged[-1].path == piece.path)
-        ):
-            merged[-1] = merged[-1]._replace(text=merged[-1].text + "\n\n" + piece.text)
+        before = passages[-1] if passages else None
+        if before and _is_tiny(piece.text) and _can_join(piece, before):
+            passages[-1] = before._replace(text=before.text + "\n\n" + piece.text)
+        elif before and _is_tiny(before.text) and _can_join(before, piece):
+            passages[-1] = piece._replace(text=before.text + "\n\n" + piece.text)
         else:
-            merged.append(piece)
-    return merged
+            passages.append(piece)
+    return passages
+
+
+def _can_join(tiny: Piece, neighbour: Piece) -> bool:
+    """The two fit in one passage, and `tiny` is not a part of a long section that would end up
+    under another section's heading path."""
+    return _fits(tiny.text, neighbour.text) and (tiny.whole_section or tiny.path == neighbour.path)
 
 
 def _trim(text: str) -> str:

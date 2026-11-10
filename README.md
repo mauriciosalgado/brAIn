@@ -2,10 +2,10 @@
 
 **Your notes: easy to write, easy to find, and searchable by your AI assistant.**
 
-brAIn turns a folder of Markdown notes (`notes/`) into a knowledge base for one person or a team.
-Notes follow one standard ([`STANDARDS.md`](STANDARDS.md)). A local MCP server lets your AI
-assistant search them by meaning, read them, and write new ones your way. Everything runs on your
-computer: no cloud, no API keys, no servers.
+brAIn turns the Markdown notes in `notes/` into a knowledge base for one person or a team. Your AI
+assistant searches them by meaning through a local MCP server, reads them, and writes new ones to
+the standard in [`STANDARDS.md`](STANDARDS.md). Everything runs on your computer: no cloud, no API
+keys.
 
 ## Set up
 
@@ -18,13 +18,13 @@ git clone <your-repo-url> brAIn && cd brAIn
 ./doctor.sh     # checks that everything works
 ```
 
-Setup also enables the required Git hook in `.githooks/`: it runs `rag sync` whenever the
-configured remote-tracking branch (`origin/main` by default) changes through a push, fetch or pull.
-It does not fetch or pull itself.
+Setup also enables a Git hook that runs `rag sync` whenever `origin/main` changes (push, fetch or
+pull). The hook does not fetch for you: run `git pull` to get your teammates' notes.
 
 ## Connect your AI assistant
 
-Add the server to your assistant's MCP settings, with the real path to this folder, and restart it:
+Add the server to your assistant's MCP settings, with the real path to this folder, then restart
+the assistant:
 
 ```json
 {
@@ -39,53 +39,53 @@ Add the server to your assistant's MCP settings, with the real path to this fold
 }
 ```
 
-Then ask in plain words: *"What do my notes say about rotating AWS keys?"* The assistant answers
-from your notes and names the note it used.
+## Use it
+
+**Search.** Ask in plain words: *"What do my notes say about rotating AWS keys?"* The assistant
+answers from your notes and names the note it used. From the terminal:
+`uv run rag query "how do we rotate AWS keys"`.
+
+**Write a note.** Ask your assistant to write it: it reads the standard and a template through
+brAIn first. Or copy a template from [`templates/`](templates/) into `notes/` yourself (the folder
+also opens as an [Obsidian](https://obsidian.md) vault). Never put secrets in a note: search results
+go to your AI assistant.
+
+**Publish.** Commit and push. Alone, push to `main`. In a team, use a branch and a pull request.
+Only pushed notes are searchable: after `git pull`, the hook updates your index.
+
+The assistant gets four tools:
 
 | Tool | What it does |
 |------|--------------|
 | `search_notes` | Passages that best match a question, each with its note path and section |
-| `read_note` | The current whole Markdown file, by a path from a search (may include unpublished edits) |
+| `read_note` | The current whole file, by a path from a search (may include unpublished edits) |
 | `get_note_standards` | The rules for writing a note, and the full path of the notes folder |
 | `get_note_template` | A ready-to-fill template (`note`, `runbook`) |
 
-To search from the terminal: `uv run rag query "how do we rotate AWS keys"`.
-
 ## How it works
 
-**Sync** (`rag sync`, run by the hook) reads the notes from the last known commit of the configured
-remote branch, never from the working tree:
+Diagrams are in [`Excalidraw/`](Excalidraw/) (open them in Obsidian):
 
-1. `rag/git.py` lists the notes added, changed or removed since the last indexed commit.
-2. `rag/index/chunker.py` cuts each note along its headings into passages (long sections are split,
-   tiny ones joined, skipped headings dropped).
-3. `rag/index/embeddings.py` turns each passage, with its section path, into a vector with a local
-   model ([arctic-embed-m-v2.0](https://huggingface.co/Snowflake/snowflake-arctic-embed-m-v2.0),
-   multilingual, run by [fastembed](https://github.com/qdrant/fastembed)).
-4. `rag/index/store.py` writes them to a [LanceDB](https://lancedb.com) table in `.rag/`, together
-   with the indexed commit. Changed settings, chunker code or embedding code rebuild the index on
-   the next sync.
+| Diagram | Shows |
+|---------|-------|
+| [`1-overview`](Excalidraw/1-overview.excalidraw.md) | The parts and how a question flows through them |
+| [`2-git-lifecycle`](Excalidraw/2-git-lifecycle.excalidraw.md) | How Git decides what the index must update |
+| [`3-chunking`](Excalidraw/3-chunking.excalidraw.md) | How a note is cut into passages |
+| [`4-indexing`](Excalidraw/4-indexing.excalidraw.md) | What `rag sync` does for each note |
 
-**Search** (CLI and MCP) only reads that index: it embeds the question, takes the closest passages
-by cosine similarity, and keeps those within `score_margin` of the best one
-(`rag/index/search.py`). It never checks Git, syncs or repairs the index; a missing or unusable
-index produces an error asking for `rag sync`. If a sync is running, search waits at most 5 seconds.
+In short:
 
-Only published notes are searchable: uncommitted edits and unpushed commits are not indexed. Notes
-that cannot be indexed (empty, over 2 MB, invalid UTF-8, over the model's token limit) are reported
-by `rag sync` and skipped. A rename counts as a delete plus an add.
-
-## Write a note
-
-Copy a template from [`templates/`](templates/) and save it in the right folder of `notes/`, or ask
-your assistant: it reads the standard and a template through brAIn first. Then commit and push.
-The folder also opens as an [Obsidian](https://obsidian.md) vault: `.obsidian/` pins its plugins.
-
-**Never put secrets in a note.** Search results are shown to your AI assistant, and a shared
-repository is shared.
-
-Working alone, commit on `main` and push. In a team, use a branch and a pull request; everyone's
-next `git pull` updates their search.
+- **Sync** reads notes from the last known commit of `origin/main`, never from your working tree,
+  and updates only the notes that changed since the last indexed commit. Notes that cannot be
+  indexed (empty, over 2 MB, invalid UTF-8, over the model's token limit) are reported and skipped.
+- **Index**: each note is cut along its headings into passages, embedded locally with
+  [arctic-embed-m-v2.0](https://huggingface.co/Snowflake/snowflake-arctic-embed-m-v2.0)
+  ([fastembed](https://github.com/qdrant/fastembed), multilingual), and stored in a
+  [LanceDB](https://lancedb.com) table in `.rag/`. Changed settings, chunker code or embedding code
+  rebuild it on the next sync.
+- **Search** only reads the index: it embeds the question and returns the closest passages, within
+  `score_margin` of the best. It never checks Git or syncs. If a sync is running, it waits up to
+  5 seconds.
 
 ## Configure
 
@@ -119,18 +119,18 @@ fixed in code on purpose (`rag/config.py`).
 | `uv run rag query "text"` | Search from the terminal |
 | `uv run rag model` | Download the search model again, or repair it |
 
-If something is wrong, start with `./doctor.sh`. To rebuild the index from scratch:
+If something is wrong, run `./doctor.sh`. To rebuild the index from scratch:
 `rm -rf .rag/lancedb && uv run rag sync`. After `git pull` brings new code, restart your assistant.
 
-The search model needs about 1.4 GB of memory while running and 320 MB of disk; the first search
-in a session takes a few seconds while it loads. Everything stays on your computer except what
-your assistant sends to its own model: the passages it retrieved.
+The search model needs about 1.4 GB of memory and 320 MB of disk; the first search in a session
+takes a few seconds to load it. Only the passages your assistant retrieves leave your computer,
+sent to its own model.
 
 ## Scale
 
-Every person builds and searches a local index, which suits teams up to some tens of thousands of
-notes. A note makes 4 to 8 passages (measured on 70 team notes and on this repository's notes). The
-cost is the first index, not search. Measured on an Apple M4 Pro, CPU only:
+Every person builds a local index, so brAIn suits one person or a team with up to some tens of
+thousands of notes. The cost is the first index, not search (Apple M4 Pro, CPU only; a note makes 4
+to 8 passages):
 
 | Passages  | Notes              | First index (28 ms per passage) | Exact search |
 |----------:|-------------------:|--------------------------------:|-------------:|
@@ -138,17 +138,15 @@ cost is the first index, not search. Measured on an Apple M4 Pro, CPU only:
 |   200,000 |   25,000 to 50,000 |                       1.6 hours |  about 80 ms |
 | 1,000,000 | 125,000 to 250,000 |                       7.9 hours |  about 0.4 s |
 
-- Disk is about 3.5 KB per passage, and searching 1,000,000 passages uses about 1 GB of memory.
-- 30,000 notes take 1 to 2 hours to index for each person. Later syncs only handle changed notes.
-- If that first index is too slow for your team, build one shared index instead of one per person.
-  This is not supported yet (see `PLAN.md`).
-- Search timings use random vectors, so search quality at that size is not measured.
+Disk is about 3.5 KB per passage. Later syncs only handle changed notes. Search timings use random
+vectors, so search quality at large sizes is not measured. A larger vault is yours to adapt.
 
 ## Project structure
 
 | Path | What it is |
 |------|------------|
 | `notes/`, `templates/`, `STANDARDS.md` | The knowledge base, note templates, and the writing standard |
+| `Excalidraw/` | Architecture diagrams (see How it works) |
 | `brain.toml` | Settings |
 | `rag/config.py`, `rag/cli.py` | Settings and terminal commands |
 | `rag/git.py` | Local Git state and committed-file reads |

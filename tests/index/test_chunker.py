@@ -210,6 +210,26 @@ def test_tiny_sections_are_merged_but_never_past_the_limit():
     assert len(chunks("# T\n\n" + "\n".join(f"## S{i}\n\nok {i}\n" for i in range(40)))) == 1
 
 
+FULL = "word " * 198  # no room left for another section in the same passage
+
+
+def test_a_tiny_section_joins_the_one_before_it():
+    result = chunks(f"# T\n\n## A\n\n{WORDS}\n\n## Tiny\n\nok\n\n## B\n\n{WORDS}")
+    assert [c.header_path for c in result] == ["T > A", "T > B"]
+    assert "## Tiny" in result[0].text
+
+
+def test_a_tiny_section_joins_the_next_one_when_the_one_before_is_full():
+    result = chunks(f"# T\n\n## A\n\n{FULL}\n\n## Tiny\n\nok\n\n## B\n\n{WORDS}")
+    assert [c.header_path for c in result] == ["T > A", "T > B"]
+    assert result[1].text.startswith("## Tiny")
+
+
+def test_a_tiny_section_that_cannot_join_is_its_own_passage():
+    result = chunks(f"# T\n\n## A\n\n{FULL}\n\n## Tiny\n\nok\n\n## B\n\n{FULL}")
+    assert [c.header_path for c in result] == ["T > A", "T > Tiny", "T > B"]
+
+
 # ---- bugs found by fuzzing real-world documents (each one has a test) ----------------------------
 
 

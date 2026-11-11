@@ -9,7 +9,7 @@ from fastmcp import Client
 from fastmcp.exceptions import ToolError
 
 from rag import config, git, notes
-from rag.index import embeddings, indexer
+from rag.index import embeddings, indexer, search
 from rag.index.chunker import chunk_markdown
 from rag.index.store import Store
 from rag.mcp.server import format_passages, mcp
@@ -94,6 +94,17 @@ def test_search_returns_readable_passages_with_citations(vault, sync):
         "section": "Keys > Rotation",
     }
     assert "Rotate access keys every ninety days" in first and first.endswith("</passage>")
+
+
+def test_search_reports_filtered_results_without_claiming_absence(vault, sync, monkeypatch):
+    (vault / "keys.md").write_text(NOTE)
+    commit = sync()
+    monkeypatch.setattr(search, "query", lambda *_args, **_kwargs: [])
+    text = call("unrelated")
+    assert text.startswith("0 passages meet the configured search score thresholds.")
+    assert "does not prove the information is absent" in text
+    assert f"Git commit {commit}" in text
+    assert passages(text) == []
 
 
 def test_search_does_not_synchronize_or_check_git(vault, sync, publish, monkeypatch):

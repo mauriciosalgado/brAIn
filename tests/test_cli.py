@@ -5,7 +5,7 @@ import pytest
 from samples import AWS
 
 from rag import cli
-from rag.index import embeddings, indexer
+from rag.index import embeddings, indexer, search
 
 
 def run_cli(monkeypatch, capsys, *args):
@@ -51,6 +51,16 @@ def test_problems_are_messages_not_tracebacks(vault, publish, monkeypatch, capsy
     publish()
     code, _, _ = run_cli(monkeypatch, capsys, "sync")
     assert code == 1 and "skipped notes/bad.md" in caplog.text
+
+
+def test_no_hits_is_an_explicit_search_result(vault, sync, monkeypatch, capsys):
+    (vault / "aws-keys.md").write_text(AWS)
+    commit = sync()
+    monkeypatch.setattr(search, "query", lambda *_: [])
+    code, out, err = run_cli(monkeypatch, capsys, "query", "unrelated")
+    assert code == 0 and err == ""
+    assert f"Git commit {commit}" in out
+    assert "No passages meet the configured search score thresholds" in out
 
 
 def test_reset_deletes_the_index_and_sync_rebuilds_it(vault, publish, monkeypatch, capsys):

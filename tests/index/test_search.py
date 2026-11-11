@@ -21,8 +21,23 @@ def test_close_chunks_from_one_note_are_all_kept():
     assert len(search.best_matches(hits)) == 3
 
 
-def test_the_best_match_is_kept_however_weak():
-    assert search.best_matches([hit("a", -0.3)]) == [hit("a", -0.3)]
+def test_even_the_best_match_is_dropped_below_the_score_floor(monkeypatch):
+    monkeypatch.setattr(config, "MIN_SCORE", 0.28)
+    assert search.best_matches([hit("a", 0.27), hit("b", 0.26)]) == []
+
+
+def test_the_score_floor_keeps_its_exact_boundary(monkeypatch):
+    monkeypatch.setattr(config, "MIN_SCORE", 0.28)
+    monkeypatch.setattr(config, "SCORE_MARGIN", 0.20)
+    hits = [hit("a", 0.30), hit("b", 0.28), hit("c", 0.279)]
+    assert search.best_matches(hits) == hits[:2]
+
+
+def test_the_relative_margin_still_applies_above_the_floor(monkeypatch):
+    monkeypatch.setattr(config, "MIN_SCORE", 0.28)
+    monkeypatch.setattr(config, "SCORE_MARGIN", 0.20)
+    hits = [hit("a", 0.80), hit("b", 0.70), hit("c", 0.50)]
+    assert search.best_matches(hits) == hits[:2]
 
 
 def test_the_best_match_comes_first_with_its_section_and_score(vault, publish):
@@ -105,3 +120,13 @@ def test_tiny_hit_stays_independent_of_its_parent(controlled_index):
     assert len(hits) == 1
     assert hits[0]["header_path"] == "Keys > Steps > Verify"
     assert hits[0]["text"] == "### Verify\n\nCheck."
+
+
+def test_search_returns_no_hits_when_all_indexed_scores_are_below_the_floor(controlled_index):
+    save_ranked(
+        controlled_index,
+        "notes/keys.md",
+        "# Keys\n\n## Rotation\n\nRotate the keys.",
+        {"Keys > Rotation": 0.1},
+    )
+    assert search.query("unrelated", controlled_index) == []

@@ -45,7 +45,11 @@ Then:
 - [ ] CI: pytest, ruff, shellcheck on Python 3.11-3.13 (the model must be downloaded first)
 - [ ] `rag eval`: run labelled questions (`tests/fixtures/team-vault/gold.json`, 85 of them) against the index
       and print hit@k / MRR, so any change to model, chunking or margin is measured, not guessed
-- [ ] Re-tune chunk size (1000 chars) for the current model, and the 0.10 score margin, with `rag eval`
+- [x] Tune defaults with offline strategy/configuration comparisons: 2,000 characters,
+      0.20 score margin. A conservative 0.25 cosine floor filters weak hits, not all irrelevant hits.
+      Keep 10 results as the configurable default; wider 20-result retrieval improved offline recall.
+      Tune for finding relevant notes to read, not complete answers in returned passages.
+      Keep `rag eval` above as the pending reusable regression command.
 - [ ] Exact-identifier boost (`aws-rds-copy`, error codes, flags): BM25 hybrid gave no gain on paraphrased
       questions, but identifier queries were not measured
 - [x] MCP `search_notes` returns plain text: one `<passage rank source section>` block per chunk, text as written, except that `<passage` tags in it are escaped
@@ -99,11 +103,15 @@ Then:
   interrupted batches cannot claim to match a commit.
 - After pulling code changes, restart the MCP server (restart your AI tool): a process with an old
   fingerprint can reject a freshly synced cache. Retrieval does not rebuild it automatically.
-- Queries return every chunk (not note) within `score_margin` (0.10) of the best, up to `max_results` (10); the best is always kept.
-  Model choice, measured on a 353-chunk mock vault (70 notes, 85 questions, near-duplicate topics):
+- Queries return chunks (not notes) within `score_margin` (0.20) of the best and at or above
+  `min_score` (0.25), up to `max_results` (10). Even the best is discarded below the floor.
+  The floor is a conservative weak-hit filter, not calibrated confidence.
+  Prior model choice, measured on a 353-chunk mock vault (70 notes, 85 questions, near-duplicate topics):
   arctic-embed-m-v2.0 has the best recall (hit@5 0.88, MRR 0.69) vs bge-small (0.71, 0.56) and
   arctic-m v1 (0.83, 0.68); it is also faster (int8) and multilingual. Qwen3-Embedding-0.6B has the
   best hit@1 (0.66) but lower hit@5 (0.78), is 2x slower and needs a custom ONNX runtime. EmbeddingGemma
   has a non-Apache license. Rejected: per-note cap (hurts recall), BM25 hybrid (no gain on paraphrased
-  questions), absolute score floor (kills recall), cross-encoder reranker (+0.04 MRR, 145 ms/query).
-  Vectors are kept at the model's full 768 dimensions: truncating to 256 saved 3x disk for 0.02 of hit@5, which was not worth numpy and a second margin. Memory is 1.4 GB per process whatever the file or session setting (measured). Chunk size (1000 chars) was not re-tuned for this model: a candidate for `rag eval`.
+  questions), high absolute score floors (kill recall), cross-encoder reranker (+0.04 MRR, 145 ms/query).
+  Vectors are kept at the model's full 768 dimensions: truncating to 256 saved 3x disk for 0.02 of hit@5, which was not worth numpy and a second margin. Memory is 1.4 GB per process whatever the file or session setting (measured).
+  The earlier 1,000-character cap was untuned. Offline comparisons now support a 2,000-character
+  high-recall default; no uniquely optimal cap or universal score threshold was established.

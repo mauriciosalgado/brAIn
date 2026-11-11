@@ -25,7 +25,7 @@ __pycache__/
 # Keep the Templates setting so templates/ works once the Templates core plugin is on:
 !.obsidian/templates.json
 
-# Keep app.json so the shared attachment folder (notes/attachments) ships with the template:
+# Keep app.json so the shared attachment folder (attachments/) ships with the template:
 !.obsidian/app.json
 
 # NOTE: core-plugins.json is deliberately NOT tracked — it's a per-user *preference*

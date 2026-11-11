@@ -46,8 +46,9 @@ answers from your notes and names the note it used. From the terminal:
 `uv run rag query "how do we rotate AWS keys"`.
 
 **Write a note.** Ask your assistant to write it: it reads the standard and a template through
-brAIn first. Or copy a template from [`templates/`](templates/) into `notes/` yourself (the folder
-also opens as an [Obsidian](https://obsidian.md) vault). Never put secrets in a note: search results
+brAIn first. Or copy a template from [`templates/`](templates/) into `notes/` yourself.
+For [Obsidian](https://obsidian.md), open the repository root as your vault; the shared configuration
+saves pasted or dragged attachments in `attachments/`. Never put secrets in a note: search results
 go to your AI assistant.
 
 **Publish.** Commit and push. Alone, push to `main`. In a team, use a branch and a pull request.

@@ -1,3 +1,0 @@
-Obsidian saves pasted/dragged images here automatically
-(Settings -> Files & Links -> attachment folder = notes/attachments, set in .obsidian/app.json).
-This placeholder keeps the folder in git; it is intentionally not a .md file so the RAG index skips it.

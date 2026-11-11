@@ -41,13 +41,15 @@ def _chunk_and_embed_notes(head: str, paths: list[str], stats: SyncStats) -> Ite
 def _group_into_write_batches(notes: Iterable[EmbeddedNote]) -> Iterator[list[EmbeddedNote]]:
     """Groups of notes holding about WRITE_BATCH_CHUNKS chunks: every write to the index creates a
     data file, so notes are not written one by one."""
-    batch, size = [], 0
+    batch: list[EmbeddedNote] = []
+    size = 0
     for note in notes:
         batch.append(note)
         size += len(note.chunks)
         if size >= config.WRITE_BATCH_CHUNKS:
             yield batch
-            batch, size = [], 0
+            batch = []
+            size = 0
     if batch:
         yield batch
 
@@ -92,8 +94,18 @@ def status() -> Status:
         head = git.remote_branch_tip(config.REMOTE, config.BRANCH)
         if config.DB_DIR.is_dir():
             store = Store(create=False)
-            indexed, sources, chunks = store.indexed_commit(), store.sources(), store.count()
+            indexed = store.indexed_commit()
+            sources = store.sources()
+            chunks = store.count()
         else:
-            indexed, sources, chunks = None, set(), 0
+            indexed = None
+            sources = set()
+            chunks = 0
         writes, deletes = git.plan_index(indexed, head, sources)
-        return Status(head, indexed, len(writes) + len(deletes), len(sources), chunks)
+        return Status(
+            branch_tip=head,
+            indexed_commit=indexed,
+            pending=len(writes) + len(deletes),
+            notes=len(sources),
+            chunks=chunks,
+        )

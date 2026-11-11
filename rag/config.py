@@ -9,7 +9,6 @@ from pydantic import (
     Field,
     StringConstraints,
     ValidationError,
-    model_validator,
 )
 
 ROOT: Path = Path(__file__).resolve().parents[1]
@@ -27,13 +26,6 @@ class Settings(BaseModel):
     max_results: int = Field(10, ge=1, le=50)
     score_margin: float = Field(0.10, gt=0, le=1)
     max_chunk_size: int = Field(1000, ge=500, le=8000)
-    min_chunk_size: int = Field(150, ge=1)
-
-    @model_validator(mode="after")
-    def _min_chunk_size_is_at_most_half_of_max(self):
-        if self.min_chunk_size > self.max_chunk_size // 2:
-            raise ValueError("min_chunk_size must be at most half of max_chunk_size")
-        return self
 
 
 def load_settings(path: Path) -> Settings:
@@ -65,7 +57,7 @@ SKIP_HEADINGS: list[str] = _SETTINGS.skip_headings
 MAX_RESULTS: int = _SETTINGS.max_results
 SCORE_MARGIN: float = _SETTINGS.score_margin
 MAX_CHUNK_SIZE: int = _SETTINGS.max_chunk_size
-MIN_CHUNK_SIZE: int = _SETTINGS.min_chunk_size
+DOCUMENT_CONTEXT_CHARS: int = 400
 MAX_NOTE_BYTES: int = 2_000_000  # a larger note is not prose: it is skipped and reported
 
 RAG_DIR: Path = ROOT / ".rag"  # the local index and model: never committed, always rebuildable

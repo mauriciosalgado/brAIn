@@ -202,32 +202,114 @@ def test_very_long_headings_are_not_repeated_but_still_fit():
     assert all(len(c.text) <= MAX_CHUNK_SIZE for c in result)
 
 
-def test_tiny_sections_are_merged_but_never_past_the_limit():
+def test_tiny_sections_remain_independent_and_bounded():
     text = "# T\n\n" + "\n".join(f"## S{i}\n\nok {i} " + "w " * 30 + "\n" for i in range(40))
     result = chunks(text)
-    assert 1 < len(result) < 40 and all(len(c.text) <= MAX_CHUNK_SIZE for c in result)
+    assert len(result) == 40 and all(len(c.text) <= MAX_CHUNK_SIZE for c in result)
     assert all(f"ok {i} " in "\n".join(c.text for c in result) for i in range(40))
-    assert len(chunks("# T\n\n" + "\n".join(f"## S{i}\n\nok {i}\n" for i in range(40)))) == 1
+    assert len(chunks("# T\n\n" + "\n".join(f"## S{i}\n\nok {i}\n" for i in range(40)))) == 40
 
 
 FULL = "word " * 198  # no room left for another section in the same passage
 
 
-def test_a_tiny_section_joins_the_one_before_it():
+def test_a_tiny_sibling_keeps_its_own_path_even_with_spare_space():
     result = chunks(f"# T\n\n## A\n\n{WORDS}\n\n## Tiny\n\nok\n\n## B\n\n{WORDS}")
-    assert [c.header_path for c in result] == ["T > A", "T > B"]
-    assert "## Tiny" in result[0].text
+    assert [c.header_path for c in result] == ["T > A", "T > Tiny", "T > B"]
+    assert result[1].text == "## Tiny\n\nok"
 
 
-def test_a_tiny_section_joins_the_next_one_when_the_one_before_is_full():
+def test_a_tiny_section_does_not_join_forward_either():
     result = chunks(f"# T\n\n## A\n\n{FULL}\n\n## Tiny\n\nok\n\n## B\n\n{WORDS}")
-    assert [c.header_path for c in result] == ["T > A", "T > B"]
-    assert result[1].text.startswith("## Tiny")
+    assert [c.header_path for c in result] == ["T > A", "T > Tiny", "T > B"]
 
 
 def test_a_tiny_section_that_cannot_join_is_its_own_passage():
     result = chunks(f"# T\n\n## A\n\n{FULL}\n\n## Tiny\n\nok\n\n## B\n\n{FULL}")
     assert [c.header_path for c in result] == ["T > A", "T > Tiny", "T > B"]
+
+
+@pytest.mark.parametrize("separator", ["\n", "\n\n"])
+def test_description_context_stops_before_metadata_and_is_embedded_with_each_chunk(separator):
+    description = "Rotate IAM keys without interrupting workloads."
+    result = chunks(
+        f"# Keys\n\n{description}{separator}Links:\nTags: #aws\n\n"
+        "Reading instructions.\n\n## Steps\n\nCreate a key."
+    )
+    assert len(result) == 2 and all(c.context == description for c in result)
+    assert result[1].embedding_text == (
+        f"Section: Keys > Steps\n\nContext: {description}\n\n## Steps\n\nCreate a key."
+    )
+    assert all("Tags:" not in c.embedding_text for c in result)
+
+
+def test_parent_and_tiny_child_remain_separate():
+    result = chunks("# Keys\n\n## Steps\n\nCreate.\n\n### Verify\n\nCheck.")
+    assert [c.header_path for c in result] == ["Keys > Steps", "Keys > Steps > Verify"]
+    assert result[0].text == "## Steps\n\nCreate."
+    assert result[1].text == "### Verify\n\nCheck."
+
+
+def test_repeated_heading_names_do_not_merge():
+    result = chunks("# Keys\n\n## Steps\n\nFirst.\n\n## Steps\n\nSecond.")
+    assert result[0].header_path == result[1].header_path
+    assert [c.text for c in result] == ["## Steps\n\nFirst.", "## Steps\n\nSecond."]
+
+
+def test_metadata_and_skipped_sections_are_not_answer_chunks_or_context():
+    result = chunks(
+        "---\ntype: example\n---\n# Keys\n\n  Tags: #aws\n\n---\n\n"
+        "## Steps\n\nCreate.\n\n## References\n\nExcluded.\n\n### Child\n\nExcluded too."
+    )
+    assert len(result) == 1 and result[0].tags == ["aws"]
+    assert "Tags:" not in result[0].embedding_text
+    assert result[0].context == ""
+    assert all(word not in result[0].text for word in ("Tags:", "Excluded", "type:"))
+
+
+def test_tags_are_normalized_lists_without_changing_prose_or_code():
+    result = chunks(
+        "# Keys\n\nRotate IAM keys.\n\nTags: #AWS #runbook #aws #aws/iam\n"
+        "tags: #runbook #key-rotation\n\n## Steps\n\nCreate a key.\n\n"
+        "```text\nTags: #example-only\n```\n"
+    )
+    assert result and all(c.tags == ["aws", "runbook", "aws/iam", "key-rotation"] for c in result)
+    assert all("Tags: #AWS" not in c.embedding_text for c in result)
+    assert "Tags: #example-only" in result[-1].text
+    assert result[-1].context == "Rotate IAM keys."
+    assert all(c.tags == [] for c in chunks("# Keys\n\n## Steps\n\nCreate a key."))
+
+
+@pytest.mark.parametrize("first", ["Links:", "Tags: #aws"])
+def test_context_never_uses_instructions_after_metadata_or_a_summary_section(first):
+    result = chunks(f"# Keys\n\n{first}\n\nRun these instructions.\n\n## Summary\n\nDetails.")
+    assert result and all(c.context == "" for c in result)
+    assert all(c.context == "" for c in chunks("## Summary\n\nNo title description."))
+
+
+def test_description_context_is_bounded():
+    description = "Rotate IAM keys without interrupting workloads. " * 20
+    result = chunks(f"# Keys\n\n{description}\n\n## Steps\n\nCreate.")
+    assert all(0 < len(c.context) <= 400 and description.startswith(c.context) for c in result)
+
+
+@pytest.mark.parametrize("description", ["", "x", "Rotate IAM keys."])
+def test_context_has_no_minimum_length(description):
+    result = chunks(f"# Keys\n\n{description}\n\nLinks:\nTags: #aws\n\n## Steps\n\nCreate.")
+    assert result and all(c.context == description for c in result)
+    if not description:
+        assert all(c.embedding_text == f"Section: {c.header_path}\n\n{c.text}" for c in result)
+
+
+def test_oversized_fences_and_tables_repeat_their_structural_wrappers():
+    code = "```sh\n" + "\n".join(f"echo row-{i}" for i in range(250)) + "\n```"
+    result = chunks("# Keys\n\n" + code)
+    assert len(result) > 1
+    assert all(c.text.startswith("```sh\n") and c.text.endswith("\n```") for c in result)
+    header = "| setting | value |\n| --- | --- |"
+    table = header + "\n" + "\n".join(f"| setting-{i} | {i} seconds |" for i in range(150))
+    result = chunks("# Keys\n\n" + table)
+    assert len(result) > 1 and all(header in c.text for c in result)
 
 
 # ---- bugs found by fuzzing real-world documents (each one has a test) ----------------------------
@@ -266,7 +348,13 @@ def check_invariants(text: str) -> None:
         re.sub(r"[*_`~]|<[^>\n]*>", "", normal),  # markup in a heading is not part of its text
         re.IGNORECASE | re.MULTILINE,
     ):
-        assert_no_text_lost(normal, "\n".join(f"{c.header_path}\n{c.text}" for c in result))
+        assert_no_text_lost(
+            normal,
+            "\n".join(
+                c.embedding_text + "\nTags: " + " ".join("#" + tag for tag in c.tags)
+                for c in result
+            ),
+        )
 
 
 def assert_no_text_lost(source: str, chunked: str) -> None:

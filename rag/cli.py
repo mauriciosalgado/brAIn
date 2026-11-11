@@ -18,11 +18,15 @@ def _query(question: str) -> int:
     from rag.index.store import open_index
 
     with open_index() as store:
+        commit = store.indexed_commit()
         hits = search.query(question, store)
+    print(f"Indexed snapshot: Git commit {commit}")
     for hit in hits:
         print(f"Source:  {hit['source']}")
         print(f"Section: {hit['header_path']}")
         print(f"Score:   {hit['score']:.2f}")
+        if hit["context"]:
+            print(f"Context: {hit['context']}")
         print(f"\n{hit['text']}\n{'-' * 40}\n")
     return 0
 

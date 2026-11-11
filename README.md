@@ -78,14 +78,38 @@ In short:
 - **Sync** reads notes from the last known commit of `origin/main`, never from your working tree,
   and updates only the notes that changed since the last indexed commit. Notes that cannot be
   indexed (empty, over 2 MB, invalid UTF-8, over the model's token limit) are reported and skipped.
-- **Index**: each note is cut along its headings into passages, embedded locally with
+- **Index**: each heading section is embedded independently; tiny siblings and children never merge.
+  Oversized sections split at Markdown blocks, then paragraphs, lines or words as needed.
+  Each embedding includes the title, heading path, a short description from below `# Title`,
+  and the fragment body. The description stops before `Links:` or `Tags:` and is capped at
+  400 characters, with no `Summary` fallback. If absent, context is stored as `""` and omitted
+  from embeddings and search output. Embeddings are made locally with
   [arctic-embed-m-v2.0](https://huggingface.co/Snowflake/snowflake-arctic-embed-m-v2.0)
   ([fastembed](https://github.com/qdrant/fastembed), multilingual), and stored in a
-  [LanceDB](https://lancedb.com) table in `.rag/`. Changed settings, chunker code or embedding code
-  rebuild it on the next sync.
+  [LanceDB](https://lancedb.com) table in `.rag/`, alongside original fragment text.
+  Each row stores its source, chunk position, heading path, description, tags, text and vector.
+  Tags are a native string list, such as `["aws", "runbook"]`: lowercase, unique and without `#`.
+  This supports future exact tag membership queries without parsing text. Tags are not embedded,
+  filtered or loaded during semantic search.
+  Changed schema, chunker code, embedding code or indexing settings rebuild it on the next sync.
 - **Search** only reads the index: it embeds the question and returns the closest passages, within
-  `score_margin` of the best. It never checks Git or syncs. If a sync is running, it waits up to
-  5 seconds.
+  `score_margin` of the best, up to `max_results`. There is no parent-section
+  expansion: even a tiny section keeps its own path and body. Blocks within the same section pack
+  together when they fit. Results identify their indexed Git commit. `read_note` instead labels
+  its output as working-tree content, which may contain unpublished edits; do not assume the two
+  versions match. Search never checks Git or syncs.
+  If a sync is running, it waits up to 5 seconds.
+
+Heading boundaries are never crossed, even when two headings have the same name. A parent
+section contains only its own text, not its children's text. A heading without body content makes
+no chunk, but remains in its children's paths. A note without `# Title` uses its filename in
+those paths and has no description context.
+
+Within one section, consecutive Markdown blocks are packed in reading order when they fit.
+Oversized code fences and tables repeat their fences or table headers when there is room;
+lists split between fitting items, with paragraph/line/word splitting as a fallback. The body
+limit does not include embedding prefixes. Description text also remains in its introduction
+chunk; it is not removed from the original body.
 
 ## Configure
 
@@ -102,8 +126,7 @@ run `uv run rag sync` for changes that affect indexing.
 | `skip_headings` | `["References", "Table of Contents", "TOC"]` | Sections under these headings are not searched |
 | `max_results` | `10` | Most passages one search returns (1 to 50) |
 | `score_margin` | `0.10` | How close to the best match a passage must be; lower is stricter |
-| `max_chunk_size` | `1000` | Longest passage in characters before a section is split (500 to 8000) |
-| `min_chunk_size` | `150` | Shorter sections join their neighbour (1 up to half of `max_chunk_size`) |
+| `max_chunk_size` | `1000` | Maximum fragment body length in characters (500 to 8000), excluding its context and heading-path prefix |
 
 `BRAIN_BRANCH` (environment variable) overrides `branch` for one checkout. The search model is
 fixed in code on purpose (`rag/config.py`).
@@ -138,8 +161,10 @@ to 8 passages):
 |   200,000 |   25,000 to 50,000 |                       1.6 hours |  about 80 ms |
 | 1,000,000 | 125,000 to 250,000 |                       7.9 hours |  about 0.4 s |
 
-Disk is about 3.5 KB per passage. Later syncs only handle changed notes. Search timings use random
-vectors, so search quality at large sizes is not measured. A larger vault is yours to adapt.
+These are vector-scan estimates, not measurements of the current chunking or context assembly.
+Stored description strings add space beyond the vectors. Later syncs only handle changed notes.
+Search timings use random vectors, so search quality at large sizes is not measured.
+A larger vault is yours to adapt.
 
 ## Project structure
 

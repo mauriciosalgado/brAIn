@@ -16,8 +16,7 @@ def best_matches(hits: list[Hit]) -> list[Hit]:
 
 
 def query(question: str, store: Store, max_results: int = config.MAX_RESULTS) -> list[Hit]:
-    """The chunks that match the question about as well as the best one does, best first, at most
-    `max_results`. Every close chunk is returned, even when several come from one note.
+    """Return at most max_results matching fragments, ranked by similarity.
 
     Reads the supplied database only. Its freshness and lifecycle belong to the caller.
     """

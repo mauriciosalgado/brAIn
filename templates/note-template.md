@@ -1,23 +1,9 @@
 # {{title}}
 
-Description of the note
+Describe what this note covers and when to use it.
 
-Links:
 Tags: #domain #type
 
----
-
-## Table of Contents
-
-<!-- toc -->
-<!-- tocstop -->
-
----
-
-## Example Heading
-
----
+## Details
 
 ## References
-
----

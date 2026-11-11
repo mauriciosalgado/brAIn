@@ -28,6 +28,7 @@ def test_sync_status_and_query(vault, publish, monkeypatch, capsys, question):
     assert code == 0 and "0 to update" in out
     code, out, _ = run_cli(monkeypatch, capsys, "query", *question)
     assert code == 0 and "notes/aws-keys.md" in out and "Score:" in out
+    assert "Section: AWS Keys" in out and "Covers:" not in out
     (vault / "aws-keys.md").write_text(AWS.replace("ninety", "sixty"))
     publish()
     code, out, _ = run_cli(monkeypatch, capsys, "query", *question)

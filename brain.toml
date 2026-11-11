@@ -28,7 +28,7 @@ skip_headings = ["References", "Table of Contents", "TOC"]
 
 # ---- What a search returns --------------------------------------------------------------------
 
-# The most passages one search returns (1 to 50).
+# The most matching fragments returned (1 to 50).
 # Raise it to give your AI assistant more context. Lower it to save its tokens.
 max_results = 10
 
@@ -36,13 +36,9 @@ max_results = 10
 # Lower is stricter: fewer passages, all very relevant. Higher lets more passages through.
 score_margin = 0.10
 
-
 # ---- How notes are cut into passages ----------------------------------------------------------
-# Each note is cut along its headings. These two numbers are in characters. The defaults suit most
-# notes. Changing them rebuilds the index on the next sync.
+# Each heading section is indexed independently, even when tiny. Changing this limit rebuilds
+# the index on the next sync. Meaningful introductory prose remains independently searchable.
 
 # A section longer than this is split into more passages (500 to 8000).
 max_chunk_size = 1000
-
-# A section shorter than this is joined to its neighbour (1 up to half of max_chunk_size).
-min_chunk_size = 150

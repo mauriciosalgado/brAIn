@@ -149,8 +149,9 @@ def get_note_standards() -> str:
 def get_note_template(template: str = "note") -> str:
     """Get a template for a new note: `note` for most notes, `runbook` for runnable procedures.
 
-    Fill it in as the standards say: replace `{{title}}` and set the tags. The other templates
-    are listed by get_note_standards.
+    Fill it in as the standards say: replace `{{title}}`, write the short description that is
+    embedded with every passage, set the tags and replace the remaining placeholders.
+    The other templates are listed by get_note_standards.
     """
     templates = _templates()
     if template not in templates:

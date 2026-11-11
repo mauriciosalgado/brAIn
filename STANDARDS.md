@@ -17,6 +17,7 @@ This document defines the standards for categorizing and naming notes in this kn
   * [Domain vs Tag Strategy](#domain-vs-tag-strategy)
 - [Tags](#tags)
 - [Title and Structure](#title-and-structure)
+  * [Sections and paragraphs](#sections-and-paragraphs)
 - [Writing Notes](#writing-notes)
 - [Scripts & Runbooks](#scripts--runbooks)
 
@@ -145,9 +146,27 @@ from indexing; tags written only there are not stored.
 - Directly under the title: one short description paragraph, then `Links:` (optional) and `Tags:`.
   Say what the note covers before giving reading or execution instructions. No `## Summary`
   heading is needed. Keep this paragraph within 400 characters: it becomes the context string
-  stored and embedded with each fragment. Context stops before `Links:` or `Tags:`.
+  stored and embedded with every fragment, not just displayed as metadata. Name the system,
+  purpose and scope so a small section can still point to the right note. Context stops before
+  `Links:` or `Tags:`; a missing description gets no generated fallback.
+  Write plain prose here, not YAML or a separate `## Context` or `## Summary` section.
 - A `## Table of Contents` and `Links` are optional for now. A `## References` section goes last.
-  Search skips References and Table of Contents, so they add no noise.
+  Search skips References and Table of Contents by default, so do not put essential facts only there.
+
+### Sections and paragraphs
+
+- Use a heading for a distinct topic or question, not for every sentence. Prefer descriptive
+  headings such as `Verify the restored database` over bare step numbers.
+- Each heading's own body stops at the next heading, including a child. A short parent description
+  and its child stay separate; the parent's body is not added to the child's embedding. Every
+  passage still embeds the full heading path and the note's introductory description.
+- Give each section meaningful content. A short fact can be useful; an empty heading produces
+  no passage. Do not pad small sections or add generic summaries just to make chunks larger.
+- Separate prose paragraphs with blank lines. Oversized sections are split into Markdown blocks,
+  and fitting pieces merge within that section. Only oversized blocks split further; never
+  assume a passage contains the entire procedure or cuts exactly at the configured limit.
+- Keep code, lists and tables well formed. Introduce code blocks with their purpose and expected
+  result instead of relying on commands alone to explain what a section does.
 
 ## Writing Notes
 
@@ -155,11 +174,14 @@ Notes vary (how-tos, decisions, user stories, plans, diagrams), so these are gui
 
 - **Say what the note is about.** The title and the short description under it are what a reader sees
   first, and search shows every passage under its note's title. Replace the template's placeholder
-  text. Prefer a descriptive title over a bare ticket ID. A generic section heading such as `Verify`
+  text, example values and unused scaffold sections. Prefer a descriptive title over a bare ticket ID.
+  A generic section heading such as `Verify`
   keeps both its full heading path and the note's description as context.
 - **Describe images.** Search reads text only. Next to a diagram or screenshot, write a sentence on what it shows.
-- **Look before writing.** If a note on the topic exists, update it instead of adding a duplicate, and
-  link the related notes.
+- **Look before writing.** Search with short, specific queries and read the full candidate notes.
+  Passages identify notes to read, not necessarily complete answers. Search uses an indexed snapshot;
+  full-note reading may show newer working-tree edits. Check the version labels rather than silently
+  combining versions. Update an existing note instead of adding a duplicate, and link related notes.
 - **Never invent facts.** If you are unsure, leave a clear `TODO` for a person.
 - **No secrets** in any note: no passwords, tokens or keys.
 
@@ -170,6 +192,9 @@ button on each code block). Define an operation once; anyone can run the vetted 
 re-deriving commands.
 Follow these rules (start from `templates/runbook-template.md`):
 
+- **Make the operation discoverable.** The introduction names the system, operation and target
+  environment; it is embedded with every passage. State prerequisites, explain each step's purpose,
+  and include validation with expected results. Do not execute a procedure from a search fragment.
 - **Share state through a temp file.** Shell blocks are separate processes, so a first **Setup** block writes the run's non-secret config (accounts, hosts, names) to `/tmp/<note>.env`. Each step block `source`s that file; a final **Cleanup** block removes it. If the file is gone (the OS clears `/tmp` every few days), re-run **Setup**.
 - **Never store secrets** in the note or the env file. Read them at run time from the environment or a secret tool (`aws sso login`, `~/.pgpass`, OS keychain).
 - **Portable paths** via magic commands (`@vault_path`, `@note_path`) — never hardcoded absolute paths.

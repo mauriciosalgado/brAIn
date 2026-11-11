@@ -11,7 +11,7 @@ import pytest
 from test_chunker import check_invariants
 
 from rag.config import MAX_CHUNK_SIZE
-from rag.index.chunker import _is_tiny, chunk_markdown
+from rag.index.chunker import chunk_markdown
 
 FIXTURES = Path(__file__).parents[1] / "fixtures"
 TEAM_NOTES = sorted((FIXTURES / "team-vault" / "notes").glob("**/*.md"))
@@ -52,10 +52,9 @@ def test_every_document_keeps_every_invariant(path):
 # ---- the team vault as a whole -----------------------------------------------------------------
 
 
-def test_the_team_vault_has_no_tiny_or_oversized_chunks():
+def test_the_team_vault_has_no_oversized_chunks():
     everything = [c for path in TEAM_NOTES for c in chunks_of(path)]
     assert len(everything) > 250
-    assert not any(_is_tiny(c.text) for c in everything)
     assert max(len(c.text) for c in everything) <= MAX_CHUNK_SIZE
     assert statistics.median(len(c.text) for c in everything) > 200
 

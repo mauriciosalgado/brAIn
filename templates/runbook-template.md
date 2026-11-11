@@ -1,19 +1,10 @@
 # {{title}}
 
-One-line purpose of this runbook. Run the blocks **in order** from Obsidian (the `execute-code`
-plugin's ▶ button).
+One short paragraph describing the system and operation this runbook covers.
 
-Links:
 Tags: #domain #script
 
----
-
-## Table of Contents
-
-<!-- toc -->
-<!-- tocstop -->
-
----
+Run the blocks **in order** from Obsidian (the `execute-code` plugin's ▶ button).
 
 ## Prerequisites
 
@@ -52,10 +43,6 @@ echo "Next step for $EXAMPLE_NAME"
 rm -f /tmp/my-runbook.env
 ```
 
----
-
 ## References
 
 - [obsidian-execute-code](https://github.com/twibiral/obsidian-execute-code)
-
----

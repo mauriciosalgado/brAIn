@@ -34,8 +34,7 @@ def _run_git(*args: str, input_text: str | None = None, errors: str = "replace")
 
 
 def _split_nul_output(output: str) -> list[str]:
-    """The fields of git's `-z` output, which separates them with NUL so paths may hold any
-    character."""
+    """Split Git's NUL-terminated fields without breaking filenames containing newlines."""
     return output.split("\0")[:-1]  # -z output ends with a separator
 
 
@@ -52,14 +51,20 @@ def remote_branch_tip(remote: str, branch: str) -> str:
 
 
 def notes_changed_between(since: str, until: str) -> tuple[list[str], list[str]]:
-    """The notes to (re)index and the notes to remove going from commit `since` to `until`.
-    A rename is a removal plus an addition."""
+    """Diff two existing commits into changed and removed note paths.
+
+    A rename is a removal plus an addition. Missing commits and other Git errors propagate.
+    """
     output = _run_git("diff", "--name-status", "--no-renames", "-z", since, until, "--", _NOTES_DIR)
     fields = _split_nul_output(output)  # status, path, status, path, ...
     changed, removed = [], []
     for status, path in zip(fields[::2], fields[1::2], strict=True):
-        if is_note(path):
-            (removed if status == "D" else changed).append(path)
+        if not is_note(path):
+            continue
+        if status == "D":
+            removed.append(path)
+        else:
+            changed.append(path)
     return changed, removed
 
 
@@ -74,9 +79,12 @@ def list_committed_notes(commit: str) -> list[str]:
 def plan_index(
     since: str | None, head: str, indexed_paths: set[str]
 ) -> tuple[list[str], list[str]]:
-    """The notes to write and the notes to remove to bring an index from commit `since` (None if
-    never indexed) up to `head`. `indexed_paths` is what the index holds now; it is used only
-    when `since` is gone from the repository, to rebuild from scratch. Never touches the DB."""
+    """Choose the note updates needed to reach `head`, without touching the database.
+
+    Use a commit diff when history exists, or all current notes when `since` is absent or gone.
+    A full plan also removes `indexed_paths` no longer present in Git. The same commit needs no
+    updates; unexpected Git errors propagate rather than becoming full plans.
+    """
     if since == head:
         return [], []
     if since:

@@ -26,6 +26,8 @@ SCHEMA = pa.schema(
         ("source", pa.string()),
         ("chunk_index", pa.int32()),
         ("header_path", pa.string()),
+        ("tags", pa.list_(pa.string())),
+        ("context", pa.string()),
         ("text", pa.string()),
         ("vector", pa.list_(pa.float32(), config.EMBEDDING_SIZE)),
     ]
@@ -43,7 +45,8 @@ FINGERPRINT = hashlib.sha256(
             config.EMBEDDING_SIZE,
             config.MODEL_MAX_TOKENS,
             config.MAX_CHUNK_SIZE,
-            config.MIN_CHUNK_SIZE,
+            config.DOCUMENT_CONTEXT_CHARS,
+            SCHEMA.to_string(),
             tuple(config.SKIP_HEADINGS),
             tuple(config.SKIP_FOLDERS),
             Path(chunker.__file__).read_bytes(),
@@ -85,6 +88,7 @@ class Hit(TypedDict):
     text: str
     source: str
     header_path: str
+    context: str
     score: float  # cosine similarity, higher is closer
 
 
@@ -96,7 +100,7 @@ class EmbeddedNote(NamedTuple):
     vectors: list[list[float]]
 
 
-def _chunks_of(sources: list[str]) -> str:
+def _source_filter(sources: list[str]) -> str:
     """A filter that matches every chunk of these notes."""
     quoted = ", ".join("'" + source.replace("'", "''") + "'" for source in sources)
     return f"source IN ({quoted})"
@@ -148,34 +152,40 @@ class Store:
     def sources(self) -> set[str]:
         """The path of every indexed note."""
         batches = self._table.search().select(["source"]).limit(None).to_batches()
-        return {source for batch in batches for source in batch.column("source").to_pylist()}
+        sources: set[str] = set()
+        for batch in batches:
+            sources.update(batch.column("source").to_pylist())
+        return sources
 
     def replace_notes(self, notes: list[EmbeddedNote]) -> None:
         """Store these notes in place of what the index holds for them, in one atomic write: a
         search sees the old chunks or the new ones, never a note with none. Every write creates
         data files, so callers pass several notes at a time."""
-        rows = [
-            {
-                "source": note.source,
-                "chunk_index": chunk.chunk_index,
-                "header_path": chunk.header_path,
-                "text": chunk.text,
-                "vector": vector,
-            }
-            for note in notes
-            for chunk, vector in zip(note.chunks, note.vectors, strict=True)
-        ]
+        rows = []
+        for note in notes:
+            for chunk, vector in zip(note.chunks, note.vectors, strict=True):
+                rows.append(
+                    {
+                        "source": note.source,
+                        "chunk_index": chunk.chunk_index,
+                        "header_path": chunk.header_path,
+                        "tags": chunk.tags,
+                        "context": chunk.context,
+                        "text": chunk.text,
+                        "vector": vector,
+                    }
+                )
         (
             self._table.merge_insert(["source", "chunk_index"])
             .when_matched_update_all()
             .when_not_matched_insert_all()
-            .when_not_matched_by_source_delete(_chunks_of([note.source for note in notes]))
+            .when_not_matched_by_source_delete(_source_filter([note.source for note in notes]))
             .execute(rows)
         )
 
     def delete_notes(self, sources: list[str]) -> None:
         if sources:
-            self._table.delete(_chunks_of(sources))
+            self._table.delete(_source_filter(sources))
 
     def count(self) -> int:
         return self._table.count_rows()
@@ -187,13 +197,14 @@ class Store:
             cast(LanceVectorQueryBuilder, self._table.search(vector))
             .distance_type("cosine")
             .limit(limit)
-            .select(["text", "source", "header_path", "_distance"])
+            .select(["text", "source", "header_path", "context", "_distance"])
         )
         return [
             {
                 "text": row["text"],
                 "source": row["source"],
                 "header_path": row["header_path"],
+                "context": row["context"],
                 "score": 1 - row["_distance"],  # cosine distance -> similarity
             }
             for row in query.to_list()

@@ -5,7 +5,7 @@ from lancedb.query import LanceVectorQueryBuilder
 
 from rag import config
 from rag.index import store
-from rag.index.chunker import Chunk
+from rag.index.chunker import Chunk, chunk_markdown
 from rag.index.store import EmbeddedNote, Store, open_index
 
 
@@ -108,11 +108,72 @@ def test_a_batch_is_one_write(vault):
     assert index.count() == 10 * 3 + 20 * 2
 
 
+def test_context_string_is_replaced_and_deleted_with_its_chunks(vault):
+    source = "notes/it's a note.md"
+    index = Store()
+
+    def save(text):
+        chunks = chunk_markdown(text, source)
+        index.replace_notes(
+            [EmbeddedNote(source, chunks, [[0.1] * config.EMBEDDING_SIZE] * len(chunks))]
+        )
+
+    save(
+        "# Keys\n\nOld description.\n\n## Steps\n\nCreate.\n\n### Verify\n\nCheck."
+        "\n\n## Rollback\n\nUndo."
+    )
+    rows = index._table.search().select(["context"]).limit(None).to_list()
+    assert rows and all(r["context"] == "Old description." for r in rows)
+
+    version = index._table.version
+    save("# Keys\n\nNew description.\n\n## Steps\n\nReplace.")
+    assert index._table.version == version + 1
+    rows = index._table.search().select(["context", "text"]).limit(None).to_list()
+    assert rows and all(r["context"] == "New description." for r in rows)
+    assert all("Old description." not in r["text"] and "### Verify" not in r["text"] for r in rows)
+
+    save("# Keys\n\n## Steps\n\nReplace.")
+    rows = Store(create=False)._table.search().select(["context"]).limit(None).to_list()
+    assert rows and all(r["context"] == "" for r in rows)
+    assert all(hit["context"] == "" for hit in index.search([0.1] * config.EMBEDDING_SIZE, 10))
+
+    index.delete_notes([source])
+    assert index.count() == 0
+
+
 def test_deleting_nothing_changes_nothing(vault):
     index = Store()
     index.replace_notes([note("notes/a.md")])
     index.delete_notes([])
     assert index.sources() == {"notes/a.md"}
+
+
+def test_tags_are_native_lists_with_exact_membership_and_atomic_replacement(vault):
+    index = Store()
+
+    def tagged(source, text):
+        chunks = chunk_markdown(text, source)
+        return EmbeddedNote(source, chunks, [[0.1] * config.EMBEDDING_SIZE] * len(chunks))
+
+    index.replace_notes(
+        [
+            tagged("notes/keys.md", "# Keys\n\nTags: #AWS #runbook\n\n## Steps\n\nCreate."),
+            tagged("notes/network.md", "# Network\n\nTags: #aws-network\n\n## Steps\n\nConnect."),
+        ]
+    )
+    reopened = Store(create=False)
+    rows = (
+        reopened._table.search()
+        .where("array_has_all(tags, ['aws', 'runbook'])")
+        .select(["source", "tags"])
+        .to_list()
+    )
+    assert rows == [{"source": "notes/keys.md", "tags": ["aws", "runbook"]}]
+    index.replace_notes([tagged("notes/keys.md", "# Keys\n\n## Steps\n\nReplace.")])
+    assert index._table.search().where("array_has_any(tags, ['aws', 'runbook'])").to_list() == []
+    assert index._table.search().where("source = 'notes/keys.md'").select(["tags"]).to_list() == [
+        {"tags": []}
+    ]
 
 
 def test_search_preserves_results_without_materializing_vectors(vault, monkeypatch):
@@ -137,9 +198,13 @@ def test_search_preserves_results_without_materializing_vectors(vault, monkeypat
             "text": row["text"],
             "source": row["source"],
             "header_path": row["header_path"],
+            "context": row["context"],
             "score": 1 - row["_distance"],
         }
         for row in expected
     ]
     assert materialized
-    assert all(set(row) == {"text", "source", "header_path", "_distance"} for row in materialized)
+    assert all(
+        set(row) == {"text", "source", "header_path", "context", "_distance"}
+        for row in materialized
+    )

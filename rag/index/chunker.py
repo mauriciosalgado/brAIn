@@ -1,21 +1,14 @@
-"""Turns a Markdown note into chunks, the pieces a search returns.
-
-A chunk is the text under one heading, with its heading path ("Title > Section"). A Markdown
-parser finds the headings, so a `#` in a code block or a quote is never one. A section that is too
-long is split at paragraph, line or word breaks; one that is too short joins its neighbour.
-Sections under a skipped heading are left out.
-"""
+"""Split Markdown into independent sections with a shared description string."""
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import NamedTuple
 
 from markdown_it import MarkdownIt
 
-from rag.config import MAX_CHUNK_SIZE, MIN_CHUNK_SIZE, SKIP_HEADINGS
+from rag.config import DOCUMENT_CONTEXT_CHARS, MAX_CHUNK_SIZE, SKIP_HEADINGS
 
-_PARSER = MarkdownIt("commonmark")
+_PARSER = MarkdownIt("commonmark").enable("table")
 
 # Frontmatter opens the file and looks like `key: value` (or a comment), so a note that merely
 # starts with a `---` rule is not mistaken for one.
@@ -23,6 +16,7 @@ _FRONTMATTER = re.compile(
     r"\A---[ \t]*\n(?=[^\n]*:|[ \t]*#).*?\n(?:---|\.\.\.)[ \t]*(?:\n|\Z)", re.DOTALL
 )
 _SKIPPED_HEADINGS = {heading.lower() for heading in SKIP_HEADINGS}
+_TAG_LINE = re.compile(r"^ {0,3}Tags:\s*(#.*)", re.IGNORECASE)
 _BREAKS = ("\n\n", "\n", " ")  # where a long text may be cut, best first
 _LONGEST_PATH_NAME = 100  # a setext "heading" can be a whole paragraph
 
@@ -32,11 +26,14 @@ class Chunk:
     text: str
     header_path: str  # the headings above the chunk, for example "Title > Section"
     chunk_index: int  # its position in the note
+    context: str = ""
+    tags: list[str] = field(default_factory=list)
 
     @property
     def embedding_text(self) -> str:
         """What gets embedded: the chunk with its section path, so headings are searchable."""
-        return f"Section: {self.header_path}\n\n{self.text}"
+        context = f"Context: {self.context}\n\n" if self.context else ""
+        return f"Section: {self.header_path}\n\n{context}{self.text}"
 
 
 @dataclass
@@ -55,14 +52,6 @@ class Section:
     end: int
 
 
-class Piece(NamedTuple):
-    """Text that may become a chunk, under one heading path."""
-
-    path: str
-    text: str
-    whole_section: bool  # the text is all of its section, not a part of a section that was split
-
-
 def chunk_markdown(text: str, source: str) -> list[Chunk]:
     """The chunks of a note, in reading order. `source` is the note's path."""
     text = text.replace("\r\n", "\n").replace("\r", "\n")
@@ -70,14 +59,134 @@ def chunk_markdown(text: str, source: str) -> list[Chunk]:
     headings = _headings(lines)
     title = _note_title(headings, source)
 
-    pieces: list[Piece] = []
-    for section in _sections(headings, lines, title):
-        section_text = "\n".join(lines[section.start : section.end])
-        if _content_length(section_text) > 0:  # a heading with nothing under it makes no chunk
-            texts = _split(section_text, MAX_CHUNK_SIZE)
-            pieces += [Piece(section.path, text, len(texts) == 1) for text in texts]
+    sections = _sections(headings, lines, title)
+    context = _document_context(lines, headings, sections)
+    tags = _take_tags(lines, headings, sections)
+    chunks = []
+    for section in sections:
+        body = _trim("\n".join(lines[section.start : section.end]))
+        if not _has_content(body):
+            continue
+        for part in _chunk_section(body):
+            if _has_content(part):
+                chunks.append(
+                    Chunk(
+                        text=part,
+                        header_path=section.path,
+                        chunk_index=len(chunks),
+                        context=context,
+                        tags=tags,
+                    )
+                )
+    return chunks
 
-    return [Chunk(p.text, p.path, i) for i, p in enumerate(_merge_tiny(pieces))]
+
+def _document_context(lines: list[str], headings: list[Heading], sections: list[Section]) -> str:
+    """First prose paragraph below # Title, before Links/Tags; no generated or Summary fallback."""
+    if not headings or headings[0].level != 1:
+        return ""
+    intro = next((s for s in sections if s.start == headings[0].line), None)
+    if intro is None:
+        return ""
+    own = lines[intro.start : intro.end]
+    for token in _PARSER.parse("\n".join(own)):
+        if token.type == "paragraph_open" and token.level == 0 and token.map:
+            start, end = token.map
+            for line in range(start, end):
+                if re.match(r"^ {0,3}(?:links|tags):", own[line], re.IGNORECASE):
+                    end = line
+                    break
+            paragraph = "\n".join(own[start:end]).strip()
+            if len(paragraph) <= DOCUMENT_CONTEXT_CHARS:
+                return paragraph
+            return paragraph[:DOCUMENT_CONTEXT_CHARS].rsplit(" ", 1)[0]
+    return ""
+
+
+def _take_tags(lines: list[str], headings: list[Heading], sections: list[Section]) -> list[str]:
+    """Extract introductory Tags: lines, leaving code, quotes, lists and later sections alone."""
+    intro_end = headings[0].line if headings else len(lines)
+    if headings and headings[0].level == 1:
+        for section in sections:
+            if section.start == headings[0].line:
+                intro_end = section.end
+                break
+
+    tags: list[str] = []
+    for token in _PARSER.parse("\n".join(lines[:intro_end])):
+        if token.type != "paragraph_open" or token.level != 0 or token.map is None:
+            continue
+        for line in range(*token.map):
+            match = _TAG_LINE.match(lines[line])
+            if match is None:
+                continue
+            for value in re.findall(r"(?<!\S)#([^\s#]+)", match[1]):
+                tag = value.lower()
+                if tag not in tags:
+                    tags.append(tag)
+            lines[line] = ""
+    return tags
+
+
+def _chunk_section(text: str) -> list[str]:
+    """Pack a section's Markdown blocks into chunk bodies, splitting oversized blocks first."""
+    if len(text) <= MAX_CHUNK_SIZE:
+        return [text]
+    lines = text.split("\n")
+    block_types: dict[int, str | None] = {0: None}
+    for token in _PARSER.parse(text):
+        if token.level == 0 and token.map is not None:
+            block_types[token.map[0]] = token.type
+    starts = sorted(block_types)
+    pieces = []
+    ends = [*starts[1:], len(lines)]
+    for start, end in zip(starts, ends, strict=True):
+        block = _trim("\n".join(lines[start:end]))
+        if not block:
+            continue
+        pieces.extend(_split_block(block, block_types[start]))
+    packed: list[str] = []
+    for piece in pieces:
+        if packed and len(packed[-1]) + 2 + len(piece) <= MAX_CHUNK_SIZE:
+            packed[-1] += "\n\n" + piece
+        else:
+            packed.append(piece)
+    return packed
+
+
+def _split_block(block: str, kind: str | None) -> list[str]:
+    if len(block) <= MAX_CHUNK_SIZE:
+        return [block]
+    if kind == "fence":
+        opening, *body = block.split("\n")
+        marker = re.match(r"\s*(`{3,}|~{3,})", opening)
+        assert marker is not None
+        closing = marker[1]
+        if body and re.fullmatch(rf"\s*{closing[0]}{{{len(closing)},}}\s*", body[-1]):
+            body.pop()
+        room = MAX_CHUNK_SIZE - len(opening) - len(closing) - 2
+        if room > 0:
+            return [f"{opening}\n{part}\n{closing}" for part in _split_text("\n".join(body), room)]
+    elif kind == "table_open":
+        lines = block.split("\n")
+        header = "\n".join(lines[:2])
+        room = MAX_CHUNK_SIZE - len(header) - 1
+        if room > 0:
+            rows = "\n".join(lines[2:])
+            return [header + "\n" + part for part in _split_text(rows, room, ("\n", " "))]
+    elif kind in ("bullet_list_open", "ordered_list_open"):
+        lines = block.split("\n")
+        starts = [
+            t.map[0]
+            for t in _PARSER.parse(block)
+            if t.type == "list_item_open" and t.level == 1 and t.map
+        ]
+        parts = []
+        ends = [*starts[1:], len(lines)]
+        for start, end in zip(starts, ends, strict=True):
+            parts.extend(_split_text("\n".join(lines[start:end]), MAX_CHUNK_SIZE))
+        return parts
+    return _split_text(block, MAX_CHUNK_SIZE)
 
 
 def _blank_out_frontmatter(text: str) -> str:
@@ -129,8 +238,8 @@ def _sections(headings: list[Heading], lines: list[str], title: str) -> list[Sec
         end = headings[0].line if headings else len(lines)
         sections.append(Section(title, 0, end))
 
-    names_above: dict[int, str] = {}  # heading level -> name
     skipped_level = None  # the level of the skipped heading we are inside, if any
+    stack: list[Heading] = []
     for i, heading in enumerate(headings):
         if skipped_level is not None and heading.level > skipped_level:
             continue  # a sub-heading of a skipped heading
@@ -138,26 +247,26 @@ def _sections(headings: list[Heading], lines: list[str], title: str) -> list[Sec
             skipped_level = heading.level
             continue
         skipped_level = None
-        name = _shorten(heading.name)
-        if not name and heading.level == 1:
-            name = title  # an empty `#` heading takes the note's title
-        names_above = {lv: above for lv, above in names_above.items() if lv < heading.level}
-        names_above[heading.level] = name
+        while stack and stack[-1].level >= heading.level:
+            stack.pop()
+        stack.append(heading)
         end = headings[i + 1].line if i + 1 < len(headings) else len(lines)
-        path = _heading_path(names_above, title)
+        path = _heading_path(stack, title)
         sections.append(Section(path, heading.line, end))
     return sections
 
 
-def _heading_path(names_above: dict[int, str], title: str) -> str:
+def _heading_path(headings: list[Heading], title: str) -> str:
     """The names joined by " > ". The note's title comes first unless it has its own `#`."""
-    names = ([] if 1 in names_above else [title]) + [
-        names_above[level] for level in sorted(names_above)
-    ]
+    names = [_shorten(heading.name) for heading in headings]
+    if headings[0].level != 1:
+        names.insert(0, title)
+    elif not names[0]:
+        names[0] = title
     return " > ".join(name for name in names if name)
 
 
-def _split(text: str, limit: int, breaks: tuple[str, ...] = _BREAKS) -> list[str]:
+def _split_text(text: str, limit: int, breaks: tuple[str, ...] = _BREAKS) -> list[str]:
     """Pieces of at most `limit` characters, cut at the first kind of break that works."""
     text = _trim(text)
     if len(text) <= limit:
@@ -166,37 +275,20 @@ def _split(text: str, limit: int, breaks: tuple[str, ...] = _BREAKS) -> list[str
         return [text[i : i + limit] for i in range(0, len(text), limit)]
     pieces: list[str] = []
     current = ""
-    for part in text.split(breaks[0]):
-        for fitting in _split(part, limit, breaks[1:]) if len(part) > limit else [part]:
-            joined = current + breaks[0] + fitting if current else fitting
+    separator = breaks[0]
+    for part in text.split(separator):
+        fitting_parts = [part]
+        if len(part) > limit:
+            fitting_parts = _split_text(part, limit, breaks[1:])
+        for fitting in fitting_parts:
+            joined = current + separator + fitting if current else fitting
             if len(joined) <= limit:
                 current = joined
             else:
                 pieces.append(current)
                 current = fitting
-    return [piece.rstrip() for piece in [*pieces, current] if piece.strip()]
-
-
-def _merge_tiny(pieces: list[Piece]) -> list[Piece]:
-    """Give every tiny piece a home: the piece before it, else the piece after it (a note often
-    starts with a title and a line of tags), else its own passage. The joined passage keeps the
-    neighbour's heading path."""
-    passages: list[Piece] = []
-    for piece in pieces:
-        before = passages[-1] if passages else None
-        if before and _is_tiny(piece.text) and _can_join(piece, before):
-            passages[-1] = before._replace(text=before.text + "\n\n" + piece.text)
-        elif before and _is_tiny(before.text) and _can_join(before, piece):
-            passages[-1] = piece._replace(text=before.text + "\n\n" + piece.text)
-        else:
-            passages.append(piece)
-    return passages
-
-
-def _can_join(tiny: Piece, neighbour: Piece) -> bool:
-    """The two fit in one passage, and `tiny` is not a part of a long section that would end up
-    under another section's heading path."""
-    return _fits(tiny.text, neighbour.text) and (tiny.whole_section or tiny.path == neighbour.path)
+    pieces.append(current)
+    return [piece.rstrip() for piece in pieces if piece.strip()]
 
 
 def _trim(text: str) -> str:
@@ -205,19 +297,12 @@ def _trim(text: str) -> str:
     return re.sub(r"\A(?:[ \t]*\n)+", "", text).rstrip()
 
 
-def _content_length(text: str) -> int:
-    """The content length without a leading Markdown heading or whitespace."""
+def _has_content(text: str) -> bool:
+    """Headings and thematic rules alone are not answer content."""
     text = _trim(text)
     lines = text.split("\n")
-    tokens = _PARSER.parse(text.split("\n\n", 1)[0])
-    if tokens and tokens[0].type == "heading_open" and tokens[0].map:
-        lines = lines[tokens[0].map[1] :]
-    return len("".join(lines).strip())
-
-
-def _is_tiny(text: str) -> bool:
-    return _content_length(text) < MIN_CHUNK_SIZE
-
-
-def _fits(first: str, second: str) -> bool:
-    return len(first) + 2 + len(second) <= MAX_CHUNK_SIZE  # 2 for the blank line between them
+    for token in _PARSER.parse(text):
+        if token.type in ("heading_open", "hr") and not token.level and token.map:
+            start, end = token.map
+            lines[start:end] = [""] * (end - start)
+    return any(line.strip() for line in lines)

@@ -124,7 +124,11 @@ Every document gets **at least two tags**: domain + type. Additional tags are en
 Tags: #domain #type [#optional-tags...]
 ```
 
-The **type** says what kind of note it is (one per note) and matches its folder. It is for humans browsing the vault; search doesn't depend on it. Teams define their own types; the table below is a suggested baseline. The **domain** is the main technology or topic, and the Domains table is only guidance, not a closed list. Tag order doesn't matter. Tags may also be a frontmatter list (`- domain`, `- type`), written without `#`.
+The **type** says what kind of note it is (one per note) and matches its folder. It is for humans browsing the vault; semantic search doesn't depend on it. Teams define their own types; the table below is a suggested baseline. The **domain** is the main technology or topic, and the Domains table is only guidance, not a closed list. Tag order doesn't matter.
+
+Use the `Tags:` line below the description for indexed tag metadata. The index stores lowercase,
+unique tag names without `#`, as a list rather than a text field. YAML frontmatter is excluded
+from indexing; tags written only there are not stored.
 
 | Type           | Folder          |
 | -------------- | --------------- |
@@ -138,7 +142,10 @@ The **type** says what kind of note it is (one per note) and matches its folder.
 ## Title and Structure
 
 - The `# Title` reflects the filename, without the "-" and with proper capitalization.
-- Under the title: a short description, then `Links:` (optional) and `Tags:`.
+- Directly under the title: one short description paragraph, then `Links:` (optional) and `Tags:`.
+  Say what the note covers before giving reading or execution instructions. No `## Summary`
+  heading is needed. Keep this paragraph within 400 characters: it becomes the context string
+  stored and embedded with each fragment. Context stops before `Links:` or `Tags:`.
 - A `## Table of Contents` and `Links` are optional for now. A `## References` section goes last.
   Search skips References and Table of Contents, so they add no noise.
 
@@ -148,7 +155,8 @@ Notes vary (how-tos, decisions, user stories, plans, diagrams), so these are gui
 
 - **Say what the note is about.** The title and the short description under it are what a reader sees
   first, and search shows every passage under its note's title. Replace the template's placeholder
-  text. If the title is only an ID (a ticket), the description must say what it is.
+  text. Prefer a descriptive title over a bare ticket ID. A generic section heading such as `Verify`
+  keeps both its full heading path and the note's description as context.
 - **Describe images.** Search reads text only. Next to a diagram or screenshot, write a sentence on what it shows.
 - **Look before writing.** If a note on the topic exists, update it instead of adding a duplicate, and
   link the related notes.

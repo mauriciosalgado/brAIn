@@ -140,10 +140,11 @@ fixed in code on purpose (`rag/config.py`).
 | `uv run rag sync` | Bring the index up to date with the searched branch |
 | `uv run rag status` | Say whether the index is up to date |
 | `uv run rag query "text"` | Search from the terminal |
+| `uv run rag reset` | Delete the index (the next `rag sync` rebuilds it from the notes) |
 | `uv run rag model` | Download the search model again, or repair it |
 
 If something is wrong, run `./doctor.sh`. To rebuild the index from scratch:
-`rm -rf .rag/lancedb && uv run rag sync`. After `git pull` brings new code, restart your assistant.
+`uv run rag reset && uv run rag sync`. After `git pull` brings new code, restart your assistant.
 
 The search model needs about 1.4 GB of memory and 320 MB of disk; the first search in a session
 takes a few seconds to load it. Only the passages your assistant retrieves leave your computer,

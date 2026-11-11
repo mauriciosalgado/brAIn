@@ -53,6 +53,20 @@ def test_problems_are_messages_not_tracebacks(vault, publish, monkeypatch, capsy
     assert code == 1 and "skipped notes/bad.md" in caplog.text
 
 
+def test_reset_deletes_the_index_and_sync_rebuilds_it(vault, publish, monkeypatch, capsys):
+    (vault / "aws-keys.md").write_text(AWS)
+    publish()
+    run_cli(monkeypatch, capsys, "sync")
+    code, out, _ = run_cli(monkeypatch, capsys, "reset")
+    assert code == 0 and "rag sync" in out
+    code, _, err = run_cli(monkeypatch, capsys, "query", "rotate keys")
+    assert code == 1 and "Run 'uv run rag sync' first" in err
+    code, out, _ = run_cli(monkeypatch, capsys, "sync")
+    assert code == 0 and out.startswith("RAG: 1 indexed (")
+    assert run_cli(monkeypatch, capsys, "reset")[0] == 0
+    assert run_cli(monkeypatch, capsys, "reset")[0] == 0  # nothing to delete is not an error
+
+
 def test_model_prepares_the_model(vault, monkeypatch, capsys):
     calls = []
     monkeypatch.setattr(embeddings, "ensure_model", lambda: calls.append("ensured"))

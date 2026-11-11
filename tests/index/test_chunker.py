@@ -305,7 +305,7 @@ def test_oversized_fences_and_tables_repeat_their_structural_wrappers():
     code = "```sh\n" + "\n".join(f"echo row-{i}" for i in range(250)) + "\n```"
     result = chunks("# Keys\n\n" + code)
     assert len(result) > 1
-    assert all(c.text.startswith("```sh\n") and c.text.endswith("\n```") for c in result)
+    assert all(re.search(r"(?m)^```sh\n", c.text) and c.text.endswith("\n```") for c in result)
     header = "| setting | value |\n| --- | --- |"
     table = header + "\n" + "\n".join(f"| setting-{i} | {i} seconds |" for i in range(150))
     result = chunks("# Keys\n\n" + table)

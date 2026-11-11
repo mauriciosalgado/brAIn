@@ -34,11 +34,16 @@ max_results = 10
 
 # How close to the best match a passage must be to be returned (above 0, up to 1).
 # Lower is stricter: fewer passages, all very relevant. Higher lets more passages through.
-score_margin = 0.10
+score_margin = 0.20
+
+# Discard passages with a cosine similarity below this floor (0 to 1).
+# 0.25 filters weak hits while favoring note discovery; similarity is not proof of relevance.
+# If even the best passage is below it, search returns no passages.
+min_score = 0.25
 
 # ---- How notes are cut into passages ----------------------------------------------------------
 # Each heading section is indexed independently, even when tiny. Changing this limit rebuilds
 # the index on the next sync. Meaningful introductory prose remains independently searchable.
 
 # A section longer than this is split into more passages (500 to 8000).
-max_chunk_size = 1000
+max_chunk_size = 2000

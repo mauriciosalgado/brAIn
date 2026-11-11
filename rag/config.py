@@ -24,8 +24,9 @@ class Settings(BaseModel):
     skip_folders: list[str] = []
     skip_headings: list[str] = ["References", "Table of Contents", "TOC"]
     max_results: int = Field(10, ge=1, le=50)
-    score_margin: float = Field(0.10, gt=0, le=1)
-    max_chunk_size: int = Field(1000, ge=500, le=8000)
+    score_margin: float = Field(0.20, gt=0, le=1)
+    min_score: float = Field(0.25, ge=0, le=1)
+    max_chunk_size: int = Field(2000, ge=500, le=8000)
 
 
 def load_settings(path: Path) -> Settings:
@@ -56,6 +57,7 @@ SKIP_FOLDERS: list[str] = _SETTINGS.skip_folders  # inside notes/
 SKIP_HEADINGS: list[str] = _SETTINGS.skip_headings
 MAX_RESULTS: int = _SETTINGS.max_results
 SCORE_MARGIN: float = _SETTINGS.score_margin
+MIN_SCORE: float = _SETTINGS.min_score
 MAX_CHUNK_SIZE: int = _SETTINGS.max_chunk_size
 DOCUMENT_CONTEXT_CHARS: int = 400
 MAX_NOTE_BYTES: int = 2_000_000  # a larger note is not prose: it is skipped and reported

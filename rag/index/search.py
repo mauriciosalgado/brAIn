@@ -6,12 +6,13 @@ from rag.index.store import Hit, Store
 
 
 def best_matches(hits: list[Hit]) -> list[Hit]:
-    """The hits (best first) that score within SCORE_MARGIN of the best one. The scores of this
-    model are compressed (a nonsense query still scores about 0.5), so noise is cut relative to
-    the best hit, never with an absolute threshold."""
+    """Keep hits above the absolute floor and within the margin of the best score.
+
+    Cosine similarity is not calibrated confidence: irrelevant hits may exceed either cutoff.
+    """
     if not hits:
         return []
-    cutoff = hits[0]["score"] - config.SCORE_MARGIN
+    cutoff = max(config.MIN_SCORE, hits[0]["score"] - config.SCORE_MARGIN)
     return [hit for hit in hits if hit["score"] >= cutoff]
 
 

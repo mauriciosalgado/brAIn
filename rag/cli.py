@@ -21,6 +21,8 @@ def _query(question: str) -> int:
         commit = store.indexed_commit()
         hits = search.query(question, store)
     print(f"Indexed snapshot: Git commit {commit}")
+    if not hits:
+        print("No passages meet the configured search score thresholds. Try a different query.")
     for hit in hits:
         print(f"Source:  {hit['source']}")
         print(f"Section: {hit['header_path']}")

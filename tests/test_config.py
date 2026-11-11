@@ -46,6 +46,10 @@ def test_settings_can_be_changed_one_at_a_time(tmp_path):
         ("max_results = 2.5", "max_results"),
         ("max_results = true", "max_results"),
         ("score_margin = 1.5", "score_margin"),
+        ("min_score = -0.1", "min_score"),
+        ("min_score = 1.1", "min_score"),
+        ('min_score = "0.28"', "min_score"),
+        ("min_score = true", "min_score"),
         ("max_chunk_size = 300", "max_chunk_size"),
         ("max_chunk_size = 600\nmin_chunk_size = 400", "min_chunk_size"),
     ],
@@ -58,6 +62,11 @@ def test_a_mistake_is_a_clear_error_that_names_the_setting(tmp_path, text, setti
 def test_a_file_that_is_not_toml_is_a_clear_error(tmp_path):
     with pytest.raises(RuntimeError, match="not valid TOML"):
         load(tmp_path, "branch = main")
+
+
+@pytest.mark.parametrize("minimum", [0.0, 0.35, 1.0])
+def test_the_score_floor_can_be_configured(tmp_path, minimum):
+    assert load(tmp_path, f"min_score = {minimum}").min_score == minimum
 
 
 def test_the_committed_file_says_what_the_defaults_say():

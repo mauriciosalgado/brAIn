@@ -94,7 +94,11 @@ In short:
   filtered or loaded during semantic search.
   Changed schema, chunker code, embedding code or indexing settings rebuild it on the next sync.
 - **Search** only reads the index: it embeds the question and returns the closest passages, within
-  `score_margin` of the best, up to `max_results`. There is no parent-section
+  `score_margin` of the best and at or above `min_score`, up to `max_results`.
+  If every passage falls below the score floor, search explicitly reports no passages.
+  Similarity is not calibrated confidence: unrelated passages can still exceed the floor.
+  Treat passages as pointers to relevant notes; read the full notes for context.
+  There is no parent-section
   expansion: even a tiny section keeps its own path and body. Blocks within the same section pack
   together when they fit. Results identify their indexed Git commit. `read_note` instead labels
   its output as working-tree content, which may contain unpublished edits; do not assume the two
@@ -126,8 +130,9 @@ run `uv run rag sync` for changes that affect indexing.
 | `skip_folders` | `[]` | Folders inside `notes/` that are not searched, such as `["archive"]` |
 | `skip_headings` | `["References", "Table of Contents", "TOC"]` | Sections under these headings are not searched |
 | `max_results` | `10` | Most passages one search returns (1 to 50) |
-| `score_margin` | `0.10` | How close to the best match a passage must be; lower is stricter |
-| `max_chunk_size` | `1000` | Maximum fragment body length in characters (500 to 8000), excluding its context and heading-path prefix |
+| `score_margin` | `0.20` | How close to the best match a passage must be; lower is stricter |
+| `min_score` | `0.25` | Minimum cosine similarity (0 to 1); weak best matches can also be discarded |
+| `max_chunk_size` | `2000` | Maximum fragment body length in characters (500 to 8000), excluding its context and heading-path prefix |
 
 `BRAIN_BRANCH` (environment variable) overrides `branch` for one checkout. The search model is
 fixed in code on purpose (`rag/config.py`).

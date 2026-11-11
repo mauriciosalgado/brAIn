@@ -6,6 +6,7 @@ Opening an existing table never rebuilds it; synchronization explicitly handles 
 
 import hashlib
 import os
+import shutil
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import timedelta
@@ -59,6 +60,13 @@ FINGERPRINT = hashlib.sha256(
 def index_lock(timeout: float = -1) -> BaseFileLock:
     """Keep index updates and readers from mixing table snapshots with commit markers."""
     return FileLock(config.LOCK_PATH, timeout=timeout)
+
+
+def delete_index() -> None:
+    """Delete the local index (not the model). The next `rag sync` rebuilds it from the notes."""
+    with index_lock():
+        if config.DB_DIR.is_dir():
+            shutil.rmtree(config.DB_DIR)  # a real failure (permissions) must not report success
 
 
 @contextmanager

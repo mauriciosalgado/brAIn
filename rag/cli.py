@@ -42,6 +42,14 @@ def _status() -> int:
     return 0 if status.indexed_commit == status.branch_tip else 1
 
 
+def _reset() -> int:
+    from rag.index.store import delete_index
+
+    delete_index()
+    print("The index is deleted. Run 'uv run rag sync' to rebuild it")
+    return 0
+
+
 def _model() -> int:
     from rag.index import embeddings
 
@@ -57,6 +65,7 @@ def _parser() -> argparse.ArgumentParser:
     query = commands.add_parser("query", help="show the passages that best match a question")
     query.add_argument("question", nargs="+", help="question, quoted or unquoted")
     commands.add_parser("status", help="say whether the index is up to date")
+    commands.add_parser("reset", help="delete the index; the next sync rebuilds it")
     commands.add_parser("model", help="download the search model, or repair it")
     return parser
 
@@ -68,6 +77,7 @@ def main() -> None:
         "sync": _sync,
         "query": lambda: _query(" ".join(args.question)),
         "status": _status,
+        "reset": _reset,
         "model": _model,
     }
     try:
